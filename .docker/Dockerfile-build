@@ -1,0 +1,22 @@
+FROM golang:1.27-trixie AS builder
+
+WORKDIR /go/src/github.com/cerberauth/cache-detective
+
+COPY go.mod go.mod
+COPY go.sum go.sum
+
+ENV CGO_ENABLED 0
+ENV GO111MODULE on
+
+RUN go mod download
+
+COPY . .
+
+RUN go build -o /usr/bin/cache-detective .
+
+FROM gcr.io/distroless/static-debian13:nonroot AS runner
+
+COPY --from=builder --chown=nonroot:nonroot /usr/bin/cache-detective /usr/bin/cache-detective
+
+ENTRYPOINT ["cache-detective"]
+CMD ["cache-detective"]

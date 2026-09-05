@@ -1,0 +1,38 @@
+---
+title: Cacheability analysis
+description: RFC 9111 Cache-Control/Expires/Pragma/Vary parsing and defaults.
+sidebar:
+  order: 2
+---
+
+Analyzes a single response's headers to determine whether it's cacheable per [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111), independent of whether anything is actually caching it (see [Live cache state](../live-cache-state/) for that).
+
+## What it checks
+
+- **Cache-Control directives**: `no-store`, `no-cache`, `private`, `public`, `max-age`, `s-maxage`, `must-revalidate`, `proxy-revalidate`, `immutable`, `no-transform`, `stale-while-revalidate`, `stale-if-error`
+- **`Expires`** and the legacy **`Pragma: no-cache`** fallback (flagged when relied on with no `Cache-Control` present at all)
+- **`Vary`** (parsed for downstream checks; see [Cache key & Vary](../cache-key-and-vary/) for whether it's *accurate*)
+- **Method cacheability**: GET/HEAD cacheable by default; POST only with explicit freshness (`max-age`/`s-maxage`/`Expires`); every other method never cached
+- **Status-code defaults** per RFC 9111 §3 (200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501 are cacheable without explicit freshness)
+- **Missing validators**: a cacheable response with neither `ETag` nor `Last-Modified`
+
+## Findings
+
+| Finding | Severity | Meaning |
+|---|---|---|
+| Conflicting Cache-Control directives | low | e.g. `no-store` combined with `max-age`/`s-maxage`, or `public` + `private` together |
+| Redundant Cache-Control directives | info | `no-cache` alongside `no-store` (already implied) |
+| Confusing Cache-Control directives | low | `private` combined with `s-maxage` (the latter has no effect) |
+| Legacy Pragma fallback in use | info | Caching relies solely on `Pragma: no-cache`, no `Cache-Control` present |
+| Cacheable response missing validators | low | Cacheable, but neither `ETag` nor `Last-Modified` is present |
+| **Authenticated response marked cacheable** | **high** | The request carried a bearer token or cookies (`--bearer`/`--cookie`) and the response is cacheable without `private`/`no-store` — see below |
+
+## Authenticated response marked cacheable
+
+This is the one security-relevant finding in this area, and it's reported as its own check (`authenticated-cacheable`, CWE-524, CVSS 8.1) so it carries real severity metadata distinct from the informational findings above. It fires when:
+
+- `--bearer` or `--cookie` was set (or the check's own auth-scoped request otherwise marks itself authenticated), **and**
+- the response is cacheable, **and**
+- it carries neither `Cache-Control: private` nor `no-store`
+
+A shared cache/CDN sitting in front of the origin may then serve that authenticated response to a different user.

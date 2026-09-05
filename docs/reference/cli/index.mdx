@@ -1,0 +1,31 @@
+---
+title: CLI reference
+description: Overview of all cache-detective CLI commands.
+sidebar:
+  order: 1
+---
+
+import { LinkCard, CardGrid } from '@/components/docs';
+
+The `cache-detective` CLI has two commands: `scan` to analyze one or more URLs, and `diff` to compare two scans over time.
+
+<CardGrid>
+  <LinkCard title="scan" description="Analyze cacheability and live cache behavior for one or more URLs." href="./scan/" />
+  <LinkCard title="diff" description="Compare two JSON scans to detect cache-config drift." href="./diff/" />
+</CardGrid>
+
+## Global usage
+
+```sh
+cache-detective <command> [flags]
+cache-detective --help
+cache-detective --version
+```
+
+`scan` exits `0` on success (even when findings were reported — see [`scan`](./scan/#exit-codes)) and non-zero on a scan/reporting error. `diff` exits non-zero when findings were added or changed severity between the two scans.
+
+## Global flags
+
+| Flag | Description |
+|---|---|
+| `--sqa-opt-out` | Opt out of anonymous usage statistics and crash reporting |

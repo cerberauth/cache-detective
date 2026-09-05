@@ -1,0 +1,30 @@
+---
+title: Cache key & Vary
+description: Declared vs. observed cache-key inclusion.
+sidebar:
+  order: 5
+---
+
+Probes what actually varies the cache key, rather than trusting the declared `Vary` header alone.
+
+## How it works
+
+For each of `Accept-Encoding`, `Accept-Language`, `User-Agent`, and a custom header, the check sends a request that varies only that input and compares the response against a baseline (a different `cdn`-detected cache-status value, or a different response body counts as "keyed").
+
+<details>
+<summary>Why User-Agent needs special handling</summary>
+
+`cache-detective`'s own probe transport ([harnessx/probe](https://github.com/cerberauth/harnessx)) deliberately overwrites the `User-Agent` header on every request for consistent identification. Varying `User-Agent` on purpose therefore bypasses that transport for just this one probe (`checkbase.DoRaw` instead of `checkbase.Do`) — every other probe in cache-detective goes through the standard transport.
+
+</details>
+
+## Findings
+
+| Finding | Severity | Meaning |
+|---|---|---|
+| Undeclared cache-key input: `<dimension>` | medium | Varying this input changed the response, but it's not declared in `Vary` — a cache-poisoning surface if the value is attacker-controlled |
+| Declared Vary dimension has no observed effect: `<dimension>` | info | Declared in `Vary`, but varying it produced no observable difference — likely inflates cache fragmentation for no benefit |
+
+## Request budget
+
+This check issues extra requests to the live target but is **not** gated behind `--aggressive` — it's read-only from the target's point of view (it never plants content a poisoned cache would later replay; that's [Cache poisoning & deception](../cache-poisoning-and-deception/)'s job). It still respects `--max-aggressive-requests` as a hard cap on probe count per resource.

@@ -1,0 +1,23 @@
+---
+title: Checks
+description: What each cache-detective check looks for and why it matters.
+sidebar:
+  order: 1
+---
+
+import { LinkCard, CardGrid } from '@/components/docs';
+
+Every check below runs as part of `cache-detective scan`. Checks tagged **aggressive-only** only run with `--aggressive` (see [`scan`](../cli/scan/#security-probing)).
+
+<CardGrid>
+  <LinkCard title="Cacheability analysis" description="RFC 9111 Cache-Control/Expires/Pragma/Vary parsing and defaults." href="./cacheability/" />
+  <LinkCard title="Live cache state" description="HIT/MISS/STALE/EXPIRED/BYPASS detection via known CDN headers." href="./live-cache-state/" />
+  <LinkCard title="CDN fingerprinting" description="Identifying the fronting CDN/reverse proxy." href="./cdn-fingerprinting/" />
+  <LinkCard title="Cache key & Vary" description="Declared vs. observed cache-key inclusion." href="./cache-key-and-vary/" />
+  <LinkCard title="Cache poisoning & deception" description="Aggressive-only probes for exploitable cache behavior." href="./cache-poisoning-and-deception/" />
+  <LinkCard title="Response consistency" description="Conditional-request handling and redirect caching." href="./response-consistency/" />
+</CardGrid>
+
+## Severity model
+
+Findings are classified critical/high/medium/low/info, following [reportx](https://github.com/cerberauth/reportx)'s severity scale. A finding's severity/CVSS/CWE/OWASP metadata comes from the *check* that raised it — see the "Design notes" section of the [project README](https://github.com/cerberauth/cache-detective#design-notes) for why security-relevant misconfigurations (like an authenticated response marked cacheable) are split into their own check rather than sharing a general-purpose one.

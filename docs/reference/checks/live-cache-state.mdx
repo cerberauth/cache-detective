@@ -1,0 +1,49 @@
+---
+title: Live cache state
+description: HIT/MISS/STALE/EXPIRED/BYPASS detection via known CDN headers.
+sidebar:
+  order: 3
+---
+
+Issues `--requests` probe requests (default `3`, spaced by `--interval`) per resource and classifies each response's live cache state, independent of whether the response is *supposed* to be cacheable (see [Cacheability analysis](../cacheability/) for that).
+
+## How detection works
+
+1. **Known CDN headers** — matched against the extensible registry in `cache/cdn`:
+
+   | CDN / server | Cache-status header |
+   |---|---|
+   | Cloudflare | `CF-Cache-Status` |
+   | Fastly | `X-Cache` |
+   | Akamai | `X-Cache` |
+   | Amazon CloudFront | `X-Cache` |
+   | Varnish | `X-Cache` |
+   | Vercel | `X-Vercel-Cache` |
+   | Netlify | `X-Nf-Request-Id` (presence only — Netlify emits no HIT/MISS verdict, so it always drops to the timing/Age heuristic below) |
+   | Pantheon | `X-Cache` |
+
+   Several of these share the `X-Cache` header name with different value vocabularies (Fastly's `hit`/`miss`/`pass` vs. Akamai's `TCP_HIT`/`TCP_MISS`/... vs. CloudFront's `Hit from cloudfront`/...). The registry disambiguates by fingerprinting the CDN from `Server`/`Via` (or CNAME, via the [CDN fingerprinting](../cdn-fingerprinting/) check) *first*, then reads that CDN's own header — never by guessing from the raw value alone.
+
+2. **Generic fallback** — an unrecognized `Server-Timing: cdn-cache; desc=HIT` convention, or a generic `X-Cache: HIT/MISS` from a proxy not in the registry.
+3. **Timing/Age heuristic** — when no header gives an explicit verdict at all: a non-decreasing `Age` header across samples, or a repeat request answered meaningfully faster than the first, both suggest a cache is serving the response. This is always reported as a best-effort inference (see "No explicit cache-status header" below), never presented as equivalent to a header-based verdict.
+4. **No signal** — if none of the above apply, the resource's live state is reported as unknown rather than guessed.
+
+**Missing your CDN or server?** [Open an issue](https://github.com/cerberauth/cache-detective/issues/new) with the cache-status header (and its HIT/MISS/STALE vocabulary) it emits — adding an entry to the registry is a data change, not a code change, so most requests are a small PR.
+
+## Findings
+
+| Finding | Severity | Meaning |
+|---|---|---|
+| No explicit cache-status header | info | No known CDN header gave a verdict; the reported state (if any) is inferred from timing/Age |
+| Cacheable response is not actually being cached | low | The response declares itself cacheable, but every sample MISSed |
+| Non-cacheable response is being served from cache | medium | The response isn't supposed to be cacheable, but at least one sample HIT — usually a CDN/edge config drifted from the origin's headers |
+
+## Multi-request patterns
+
+Across the `--requests` samples for a resource, the check also tracks:
+
+- **First-miss-then-hit** — the textbook cold-cache-then-warm pattern
+- **Age increasing across hits** — evidence the same object is being served repeatedly rather than refreshed each time
+- **Hit/miss ratio** — tallied across all samples
+
+This data is available to other checks (e.g. [CDN fingerprinting](../cdn-fingerprinting/) reuses the captured response instead of re-requesting it).

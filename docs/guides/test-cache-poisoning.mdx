@@ -1,0 +1,49 @@
+---
+title: Test for cache poisoning & deception
+description: Run cache-detective's aggressive checks against a live target and interpret the results.
+---
+
+import { Aside } from '@/components/docs';
+
+<Aside type="caution">
+  Use `--aggressive` only against systems you own or have explicit written permission to test. A positive result means the probe just demonstrated it can plant content in a shared cache other users may be served.
+</Aside>
+
+## Run the aggressive checks
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive
+```
+
+This enables the four checks documented in [Cache poisoning & deception](../reference/checks/cache-poisoning-and-deception/): unkeyed header injection, cache deception, error-response caching, and response splitting via cache-key manipulation. Every other check (cacheability, live cache state, CDN fingerprinting, cache key & Vary, response consistency) runs regardless of `--aggressive`.
+
+## Cap the request volume
+
+Each aggressive check issues extra requests to the live target. `--max-aggressive-requests` (default `10`) is a hard cap per resource, applied even with `--aggressive` set:
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive --max-aggressive-requests 4
+```
+
+## Testing an authenticated endpoint for cache deception
+
+Cache deception is most dangerous on endpoints that serve per-user content. Pass credentials so the probe hits the endpoint the way a logged-in user would:
+
+```sh
+cache-detective scan --url https://staging.example.com/account --aggressive \
+  --bearer "$TOKEN"
+```
+
+If the response is served identically (and cacheably) under a path-confused URL like `/account.js` or `/account/nonexistent.css`, you'll see a **Cache deception via path confusion** finding (high severity, CWE-524). Combined with credentials, also check for **Authenticated response marked cacheable** (see [Cacheability analysis](../reference/checks/cacheability/#authenticated-response-marked-cacheable)) — that check runs by default, without `--aggressive`, since it's a passive analysis of the response your own request received.
+
+## Interpreting a finding
+
+```sh
+cache-detective scan --url https://staging.example.com/poison --aggressive --show-all-findings
+```
+
+An **Unkeyed header injection via X-Forwarded-Host** finding means: a marker value sent in that header was reflected into the response, and a completely plain follow-up request received the same poisoned response back. That's proof the header isn't part of the cache key at your CDN/reverse-proxy layer — any attacker who can reach the endpoint can plant arbitrary content for other visitors until the cache entry expires or is purged.
+
+## CI integration
+
+See the [GitHub Actions guide](../github-actions/#fail-the-build-on-a-specific-finding) for gating a build on a specific aggressive-mode finding.

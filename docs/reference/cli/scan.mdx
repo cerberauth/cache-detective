@@ -1,0 +1,98 @@
+---
+title: scan
+description: Analyze cacheability and live cache behavior for one or more URLs.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@/components/docs';
+
+Probes one or more URLs to determine whether each response is cacheable per HTTP semantics (RFC 9111), whether it's actually being cached, and how the fronting CDN/reverse proxy handles the cache key.
+
+```sh
+cache-detective scan --url https://example.com/
+```
+
+## Resource selection
+
+Exactly one of these must be set:
+
+| Flag | Description |
+|---|---|
+| `--url` | Single target URL to scan |
+| `--list` | Path to a newline-delimited list of URLs (`#`-prefixed lines are comments) |
+| `--sitemap` | URL of a `sitemap.xml` to scan (flat `<urlset>` only, not `<sitemapindex>`) |
+| `--har` | Path to a `.har` file to import GET/HEAD requests from |
+| `--crawl` | Crawl same-origin links starting from `--url` instead of scanning it alone |
+
+### Crawl-specific flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--path-prefix` | *(none)* | Restrict `--crawl` to URLs under this path prefix |
+| `--max-pages` | `50` | Maximum pages to discover with `--crawl` |
+| `--respect-robots` | `true` | Honor `robots.txt` `Disallow` rules for `*` during `--crawl` |
+
+```sh
+cache-detective scan --url https://example.com/ --crawl --path-prefix /blog --max-pages 100
+```
+
+## Request configuration
+
+| Flag | Default | Description |
+|---|---|---|
+| `--method` | `GET` | HTTP method to test |
+| `--header` | *(none)* | Custom request header `"Name=Value"` (repeatable) |
+| `--cookie` | *(none)* | Cookie `"name=value"` to send with every request (repeatable) |
+| `--bearer` | *(none)* | Bearer token for authenticated cache testing |
+| `--requests` | `3` | Probe requests issued per resource for live cache-state detection |
+| `--interval` | `500ms` | Delay between consecutive probe requests to the same resource |
+| `--timeout` | `15s` | Per-request timeout |
+| `--max-concurrency` | number of CPUs | Maximum concurrent checks |
+| `--max-resource-concurrency` | number of CPUs | Maximum concurrent resources per check |
+
+```sh
+cache-detective scan --url https://example.com/account \
+  --bearer "$TOKEN" \
+  --cookie "session=abc123" \
+  --header "X-Api-Version=2"
+```
+
+## Security probing
+
+<Aside type="caution">
+  `--aggressive` probes for cache poisoning and cache deception — a positive result means the probe just demonstrated it can plant content in a shared cache other users may be served. Only run it against systems you own or have explicit written permission to test.
+</Aside>
+
+| Flag | Default | Description |
+|---|---|---|
+| `--aggressive` | `false` | Enable cache poisoning/deception probing |
+| `--max-aggressive-requests` | `10` | Hard cap on extra probe requests per resource for `--aggressive` checks (and the read-only vary-key check), even with `--aggressive` set |
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive
+```
+
+## Output
+
+`scan` shares its output/reporting flags with the rest of the CerberAuth CLI suite:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--format` | `terminal` | Terminal display format |
+| `--no-color` | `false` | Disable ANSI colors in terminal output |
+| `--quiet` | `false` | Suppress terminal display of the report |
+| `--output` | *(none)* | File path to additionally write the report to |
+| `--output-format` | `json` | Format for `--output` |
+| `--show-all-findings` | `false` | Show every finding on stdout, not just active ones |
+| `--report-url` | *(none)* | HTTP endpoint to POST the report to |
+| `--report-header` | *(none)* | Additional HTTP headers for the report transport (`key=value`) |
+| `--report-format` | `json` | Format for `--report-url` |
+
+```sh
+cache-detective scan --url https://example.com/ --output-format json --output report.json --quiet
+```
+
+## Exit codes
+
+`scan` exits `1` if any check itself failed to execute (network errors, timeouts, ...) and `0` otherwise — findings are reported but don't affect the exit code on their own. To gate a build on specific findings, parse the JSON output (see the [GitHub Actions guide](../../github-actions/#fail-the-build-on-a-specific-finding)) or use [`diff`](./diff/) to detect drift against a baseline.

@@ -1,0 +1,78 @@
+---
+title: Installation
+description: Install cache-detective as a CLI tool.
+sidebar:
+  order: 2
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@/components/docs';
+
+## CLI
+
+<Tabs>
+  <TabItem label="go install">
+
+```sh
+go install github.com/cerberauth/cache-detective@latest
+```
+
+Requires Go 1.24 or later.
+
+  </TabItem>
+  <TabItem label="Homebrew">
+
+```sh
+brew install cerberauth/tap/cache-detective
+```
+
+  </TabItem>
+  <TabItem label="Docker">
+
+```sh
+docker run --rm ghcr.io/cerberauth/cache-detective scan --url https://example.com/
+```
+
+See the [Docker guide](./docker/) for volume mounts, Compose, and CI usage.
+
+  </TabItem>
+  <TabItem label="From source">
+
+<Steps>
+
+1. Clone the repository:
+
+   ```sh
+   git clone https://github.com/cerberauth/cache-detective.git
+   cd cache-detective
+   ```
+
+2. Build the binary:
+
+   ```sh
+   go build -o cache-detective .
+   ```
+
+3. Move it to your `PATH`:
+
+   ```sh
+   mv cache-detective /usr/local/bin/
+   ```
+
+</Steps>
+
+  </TabItem>
+</Tabs>
+
+Verify the installation:
+
+```sh
+cache-detective --version
+```
+
+## GitHub Actions
+
+To use `cache-detective` in a GitHub Actions workflow, see the [GitHub Actions guide](./github-actions/).
+
+<Aside type="caution">
+  `--aggressive` intentionally probes for exploitable cache behavior (cache poisoning, cache deception). Only run it against systems you own or have explicit written permission to test.
+</Aside>

@@ -1,0 +1,68 @@
+---
+title: Crawl and scan a whole site
+description: Resolve a scan's resource list from a single URL, a list file, a sitemap, a .har import, or a same-origin crawl.
+---
+
+`cache-detective scan` needs a resolved list of URLs before it can run any check — exactly one of `--url`, `--list`, `--sitemap`, `--har`, or `--crawl` supplies it. Every check then runs concurrently across that resource list (`--max-resource-concurrency` bounds it).
+
+## From a sitemap
+
+```sh
+cache-detective scan --sitemap https://example.com/sitemap.xml
+```
+
+Only a flat `<urlset>` is read — sitemap indexes (`<sitemapindex>`) that reference other sitemaps aren't followed recursively.
+
+## From a list file
+
+```sh
+cat > urls.txt <<'EOF'
+# production pages to monitor
+https://example.com/
+https://example.com/pricing
+https://example.com/blog/getting-started
+EOF
+
+cache-detective scan --list urls.txt
+```
+
+## From a browser session (.har)
+
+Record a `.har` file from your browser's devtools (Network tab → "Save all as HAR"), then:
+
+```sh
+cache-detective scan --har session.har
+```
+
+Only `GET`/`HEAD` entries are imported — cache-detective has no business replaying the non-idempotent requests a HAR capture also contains.
+
+## Same-origin crawl
+
+```sh
+cache-detective scan --url https://example.com/ --crawl
+```
+
+This discovers same-origin links starting from `--url`, breadth-first, up to `--max-pages` (default `50`). It's a same-origin, single-page link-extraction crawl — not a full-site spider that follows redirects across hosts or executes JavaScript.
+
+### Restrict to a path prefix
+
+```sh
+cache-detective scan --url https://example.com/blog/ --crawl --path-prefix /blog
+```
+
+### Courtesy: robots.txt
+
+`--respect-robots` (default `true`) honors `robots.txt` `Disallow` rules for the `*` user agent during a crawl. Disable it only if you have a specific reason to bypass it on a target you're authorized to scan more thoroughly:
+
+```sh
+cache-detective scan --url https://example.com/ --crawl --respect-robots=false
+```
+
+## Rate limiting
+
+`--interval` spaces consecutive probe requests to the *same* resource (for live cache-state sampling); `--max-concurrency`/`--max-resource-concurrency` bound how many checks/resources run in parallel across the whole scan. Combine both to stay under a target's rate limits during a large crawl:
+
+```sh
+cache-detective scan --url https://example.com/ --crawl --max-pages 200 \
+  --max-resource-concurrency 4 --interval 1s
+```

@@ -1,0 +1,43 @@
+---
+title: CDN fingerprinting
+description: Identifying the fronting CDN/reverse proxy.
+sidebar:
+  order: 4
+---
+
+Identifies the CDN/reverse proxy in front of a resource and flags evidence of multi-tier caching (an edge layer plus a shield/regional layer).
+
+## How it works
+
+1. Reuses the [live cache state](../live-cache-state/) check's already-captured response (no extra request) to check `Server`/`Via` header matches from the CDN registry.
+2. Resolves the resource's **CNAME chain** and matches it against the registry's known apex domains when the header match alone isn't conclusive.
+3. Flags **multi-tier caching** when a CDN's registered "multi-tier" headers are present (e.g. Fastly's `X-Served-By`/`X-Cache-Hits`, Varnish's `X-Varnish`).
+
+## Supported CDNs / servers
+
+| CDN / server | Server/Via fingerprint | CNAME apex |
+|---|---|---|
+| Cloudflare | `cloudflare` | `cloudflare.net` |
+| Fastly | `fastly` (Server), `varnish` (Via) | `fastly.net`, `fastlylb.net` |
+| Akamai | `akamaighost` | `akamaiedge.net`, `akamaitechnologies.com`, `akamai.net` |
+| Amazon CloudFront | `cloudfront` (Via) | `cloudfront.net` |
+| Varnish | `varnish` (Via) | — |
+| Vercel | `vercel` | `vercel-dns.com`, `vercel.app` |
+| Netlify | `netlify` | `netlify.app`, `netlifyglobalcdn.com` |
+| Pantheon | `pantheon` | `pantheonsite.io` |
+
+The full signature table, including each entry's cache-status header, lives in [`cache/cdn/registry.go`](https://github.com/cerberauth/cache-detective/blob/main/cache/cdn/registry.go).
+
+A `Server`/`Via`/CNAME that doesn't match any of the above isn't a dead end: the [live cache state](../live-cache-state/) check still falls back to generic header conventions and a timing/Age heuristic (see that page for the fallback chain) — this check just reports no CDN name in that case.
+
+**Missing your CDN or server?** [Open an issue](https://github.com/cerberauth/cache-detective/issues/new) with the `Server`/`Via`/cache-status headers and CNAME chain it emits. Adding an entry to the registry is a data change, not a code change, so most requests are a small PR.
+
+## What's not implemented (yet)
+
+**IP range (ASN/CIDR) matching** is deliberately not implemented — it needs a maintained, licensable ASN/CIDR dataset. The result field it would populate (`IPRangeLookupAvailable`) is defined so a real backend can be dropped in later without reshaping this check.
+
+## Findings
+
+| Finding | Severity | Meaning |
+|---|---|---|
+| Multi-tier caching detected | info | Evidence of more than one cache tier (edge + shield/regional) |

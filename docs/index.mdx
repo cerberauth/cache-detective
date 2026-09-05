@@ -1,0 +1,64 @@
+---
+title: Get Started
+description: HTTP cache & CDN behavior analysis CLI — cacheability, live cache state, CDN fingerprinting, cache-key/Vary analysis, and cache poisoning/deception checks.
+template: splash
+hero:
+  tagline: Analyze live URLs for HTTP cacheability, live cache state, CDN behavior, and cache-related security issues from the CLI or in GitHub Actions.
+  actions:
+    - text: Get started
+      link: ./installation/
+      icon: right-arrow
+      variant: primary
+    - text: CLI reference
+      link: ./reference/cli/
+      icon: open-book
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid, LinkCard } from '@/components/docs';
+
+<CardGrid stagger>
+  <Card title="Cacheability" icon="magnifier">
+    Parse Cache-Control/Expires/Pragma/Vary and RFC 9111 status/method defaults to determine if a response is cacheable.
+  </Card>
+  <Card title="Live cache state" icon="approve-check">
+    Detect HIT/MISS/STALE/EXPIRED/BYPASS via known CDN headers, with a timing/Age heuristic fallback.
+  </Card>
+  <Card title="CDN fingerprinting" icon="setting">
+    Identify the fronting CDN/reverse proxy via CNAME chain resolution and Server/Via header matching.
+  </Card>
+  <Card title="Cache key & Vary" icon="pencil">
+    Probe what actually varies the cache key — declared Vary headers vs. undeclared/unkeyed inputs.
+  </Card>
+  <Card title="Security testing" icon="warning">
+    Opt-in cache poisoning and cache deception probes for live, authorized targets.
+  </Card>
+</CardGrid>
+
+## Quick start
+
+```sh
+# Install
+go install github.com/cerberauth/cache-detective@latest
+
+# Analyze a single URL
+cache-detective scan --url https://example.com/
+
+# JSON output for CI
+cache-detective scan --url https://example.com/ --output-format json --output report.json
+
+# Cache poisoning / cache deception probing (opt-in, non-destructive by default)
+cache-detective scan --url https://example.com/ --aggressive
+```
+
+## Explore the docs
+
+<CardGrid>
+  <LinkCard title="Installation" description="Install via go install, Homebrew, or Docker." href="./installation/" />
+  <LinkCard title="CLI reference" description="All commands, flags, and exit codes." href="./reference/cli/" />
+  <LinkCard title="Checks" description="What each check looks for and why it matters." href="./reference/checks/" />
+  <LinkCard title="Guides" description="Crawling a site, CI drift detection, and more." href="./guides/" />
+  <LinkCard title="GitHub Actions" description="Run cache-detective in CI." href="./github-actions/" />
+  <LinkCard title="Docker" description="Run cache-detective from a container — no local Go toolchain required." href="./docker/" />
+</CardGrid>

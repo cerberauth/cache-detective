@@ -1,0 +1,46 @@
+---
+title: Detect cache-config drift over time
+description: Use scan's JSON output and the diff command to catch cache-behavior regressions between deploys.
+---
+
+A CDN/reverse-proxy config change, a new edge rule, or an origin header regression can silently change a site's caching behavior. `cache-detective scan --output-format json` plus `cache-detective diff` catches that drift in CI.
+
+## Save a baseline
+
+```sh
+cache-detective scan --url https://example.com/ --output-format json --output baseline.json --quiet
+```
+
+## Scan again after a change
+
+```sh
+cache-detective scan --url https://example.com/ --output-format json --output after.json --quiet
+```
+
+## Compare
+
+```sh
+cache-detective diff baseline.json after.json
+```
+
+```text
+Target: https://example.com/ -> https://example.com/
+
+Added (1):
+  + [medium] Undeclared cache-key input: accept-language ()
+
+Removed (1):
+  - [low] Cacheable response missing validators ()
+
+Changed severity (0):
+```
+
+`diff` exits `1` when findings were **added** or **changed severity**, and `0` when findings were only removed (or nothing changed) — so it can gate a build without failing on pure improvements.
+
+## Wiring it into CI
+
+Persist each scan's JSON as a build artifact and diff against the previous run's artifact — see the full example in the [GitHub Actions guide](../github-actions/#detect-cache-config-drift-between-deploys).
+
+## What counts as "the same finding"
+
+Findings are matched across the two scans by `id` (falling back to `title` when a check didn't set one), `url`, and `parameter`. cache-detective's checks don't currently populate `url`/`parameter` (hence the empty trailing `()` above), so two same-titled findings from one check against the *same resource* — e.g. cache deception firing for more than one probed path suffix — are indistinguishable to `diff` today. A finding whose *severity* changed between scans (e.g. a check gained real CVSS metadata, or the underlying condition got worse) shows up under "Changed severity" rather than as a separate added/removed pair.

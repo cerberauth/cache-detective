@@ -1,0 +1,39 @@
+---
+title: diff
+description: Compare two cache-detective JSON scans to detect cache-config drift.
+sidebar:
+  order: 3
+---
+
+Compares two scans, each produced via `scan --output-format json --output <file>`, and reports findings that newly appeared, disappeared, or changed severity between the two.
+
+```sh
+cache-detective scan --url https://example.com/ --output-format json --output before.json
+# ... deploy a change ...
+cache-detective scan --url https://example.com/ --output-format json --output after.json
+
+cache-detective diff before.json after.json
+```
+
+```text
+Target: https://example.com/ -> https://example.com/
+
+Added (1):
+  + [medium] Undeclared cache-key input: accept-language ()
+
+Removed (0):
+
+Changed severity (0):
+```
+
+## Usage
+
+```sh
+cache-detective diff <before.json> <after.json>
+```
+
+Findings are matched by their `id` (falling back to `title` when absent), `url`, and `parameter` — the same fields reportx's JSON output carries for every finding. cache-detective's checks don't currently populate `url`/`parameter` (the trailing `()` above), so two same-titled findings from one check against the same resource are treated as identical — see [Known limitations](https://github.com/cerberauth/cache-detective#known-limitations) in the project README.
+
+## Exit codes
+
+`diff` exits `1` when findings were **added** or **changed severity** between the two scans, and `0` otherwise (including when findings were only removed). This makes it suitable as a CI gate for cache-config drift — see the [GitHub Actions guide](../../github-actions/#detect-cache-config-drift-between-deploys).

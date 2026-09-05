@@ -1,0 +1,108 @@
+---
+title: GitHub Actions
+description: Run cache-detective in CI/CD pipelines to catch cache-config drift and cache-related security issues.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@/components/docs';
+
+Run `cache-detective` in your GitHub Actions workflows to catch cache misconfigurations before they reach production.
+
+There is no `cerberauth/cache-detective-action` composite action yet — install the CLI directly (via `go install` or the Docker image) as a workflow step.
+
+## Setup step
+
+```yaml
+- name: Install cache-detective
+  run: go install github.com/cerberauth/cache-detective@latest
+```
+
+Or use the Docker image to avoid needing Go:
+
+```yaml
+- name: Scan for cache misconfigurations
+  run: |
+    docker run --rm ghcr.io/cerberauth/cache-detective \
+      scan --url "$TARGET_URL" --output-format json --output report.json
+  env:
+    TARGET_URL: ${{ vars.TARGET_URL }}
+```
+
+<Aside type="caution">
+  `--aggressive` intentionally probes for exploitable cache poisoning/deception behavior. Only point it at systems you own or have explicit written permission to test, and store target URLs/credentials in [encrypted secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets).
+</Aside>
+
+## Example: scan on pull request
+
+```yaml
+name: Cache behavior scan
+
+on:
+  pull_request:
+
+jobs:
+  cache-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install cache-detective
+        run: go install github.com/cerberauth/cache-detective@latest
+
+      - name: Scan staging deployment
+        run: cache-detective scan --url ${{ vars.STAGING_URL }} --sqa-opt-out
+```
+
+`cache-detective scan` exits non-zero when a check fails to execute (network errors, etc). Findings themselves don't currently fail the build on their own — pair it with `diff` (below) or a `jq` assertion over the JSON output to gate on specific findings.
+
+## Common use cases
+
+### Fail the build on a specific finding
+
+```yaml
+- name: Assert no cache deception findings
+  run: |
+    cache-detective scan --url ${{ vars.STAGING_URL }} --aggressive --sqa-opt-out \
+      --output-format json --output report.json --quiet
+    count=$(jq '[.findings[] | select(.title == "Cache deception via path confusion")] | length' report.json)
+    if [ "$count" -gt 0 ]; then
+      echo "::error::Cache deception detected"
+      exit 1
+    fi
+```
+
+### Detect cache-config drift between deploys
+
+Save each scan's JSON output as a build artifact, then diff the current scan against the previous one:
+
+```yaml
+- name: Scan current deployment
+  run: cache-detective scan --url ${{ vars.STAGING_URL }} --sqa-opt-out --output-format json --output after.json --quiet
+
+- name: Download previous scan
+  uses: actions/download-artifact@v8
+  with:
+    name: cache-scan-baseline
+    path: .
+
+- name: Compare against baseline
+  run: cache-detective diff before.json after.json
+
+- name: Upload as new baseline
+  uses: actions/upload-artifact@v7
+  with:
+    name: cache-scan-baseline
+    path: after.json
+```
+
+`cache-detective diff` exits non-zero when findings were added or changed severity, so it can gate the build directly. See [`diff`](./reference/cli/diff/) for details.
+
+### Crawl a site instead of scanning one URL
+
+```yaml
+- name: Crawl and scan
+  run: |
+    cache-detective scan --url ${{ vars.STAGING_URL }} --crawl --path-prefix /blog \
+      --sqa-opt-out --output-format json --output report.json
+```

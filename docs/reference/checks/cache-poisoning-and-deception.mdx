@@ -1,0 +1,46 @@
+---
+title: Cache poisoning & deception
+description: Aggressive-only probes for exploitable cache behavior.
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@/components/docs';
+
+<Aside type="caution">
+  Every check on this page only runs with `--aggressive` — a positive result means the probe just demonstrated it can plant content in a shared cache other users may be served. Only run these against systems you own or have explicit written permission to test. `--max-aggressive-requests` (default `10`) hard-caps extra requests per resource even with `--aggressive` set.
+</Aside>
+
+## Unkeyed header injection
+
+Injects a marker into headers commonly reflected but left unkeyed by CDNs (`X-Forwarded-Host`, `X-Forwarded-Scheme`, `X-Original-URL`, `X-Rewrite-URL`), then sends a follow-up plain request to check whether it receives the poisoned response back — the classic [web cache poisoning](https://portswigger.net/web-security/web-cache-poisoning) technique.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Unkeyed header injection via `<header>` | critical | CWE-444 |
+
+## Cache deception
+
+Appends a static-file extension or a nonexistent sub-path (`/nonexistent.js`, `.css`, `/nonexistent.jpg`, ...) to the resource's path and checks whether the (potentially authenticated) origin response is served — and looks cacheable — under that URL. This is [cache deception](https://cwe.mitre.org/data/definitions/524.html) via path confusion / static-extension probing.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Cache deception via path confusion | high | CWE-524 |
+
+## Error response caching
+
+Provokes a 4xx/5xx response (via an out-of-range `Range` request) and checks whether the error response itself carries cache directives that make it cacheable — a transient error served to other users for longer than intended.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Error response is cacheable | medium | CWE-524 |
+
+## Response splitting via cache-key manipulation
+
+Injects a CRLF-encoded header/path fragment into an unkeyed input and checks whether it's reflected as a literal, separate response header — [HTTP response splitting](https://cwe.mitre.org/data/definitions/113.html) exploitable through the cache.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Response splitting via unkeyed input | critical | CWE-113 |
+
+This check depends on the unkeyed-header-injection check completing first (rather than just on resource discovery) — both manipulate the same unkeyed inputs on the same live resource, and running them concurrently could let one check's poisoning request land in the middle of the other's poison/confirm pair and mask its finding.

@@ -1,0 +1,108 @@
+---
+title: Docker
+description: Run cache-detective from a container — no local Go toolchain required.
+sidebar:
+  order: 5
+---
+
+import { Steps, Aside, Tabs, TabItem } from '@/components/docs';
+
+`cache-detective` is published on Docker Hub and GHCR. The entrypoint is the `cache-detective` binary itself, so any CLI command works after the image name.
+
+## Quick start
+
+```sh
+docker run --rm ghcr.io/cerberauth/cache-detective scan --url https://example.com/
+```
+
+```sh
+docker run --rm cerberauth/cache-detective scan --url https://example.com/
+```
+
+## Mounting a list file, sitemap output, or a .har import
+
+Commands that read a local file (`--list`, `--har`) need that file inside the container. Mount the containing directory as a volume and reference the in-container path:
+
+```sh
+docker run --rm -v "$(pwd)":/data ghcr.io/cerberauth/cache-detective \
+  scan --list /data/urls.txt
+```
+
+```sh
+docker run --rm -v "$(pwd)":/data ghcr.io/cerberauth/cache-detective \
+  scan --har /data/session.har
+```
+
+## Probing a live server
+
+<Aside type="caution">
+  Only run `--aggressive` scans against systems you own or have explicit written permission to test.
+</Aside>
+
+```sh
+docker run --rm ghcr.io/cerberauth/cache-detective \
+  scan --url https://staging.example.com/ --aggressive
+```
+
+When probing a server running in another container, join its network:
+
+```sh
+docker run --rm --network container:api ghcr.io/cerberauth/cache-detective \
+  scan --url http://localhost:8080/
+```
+
+## Docker Compose
+
+Run `cache-detective` as a one-off step alongside a service under test:
+
+```yaml
+services:
+  api:
+    build: .
+    ports:
+      - '8080:8080'
+
+  cache-detective:
+    image: ghcr.io/cerberauth/cache-detective
+    depends_on:
+      - api
+    command: ['scan', '--url', 'http://api:8080/']
+```
+
+```sh
+docker compose run --rm cache-detective
+```
+
+## Build from source
+
+<Steps>
+
+1. Clone the repository:
+
+   ```sh
+   git clone https://github.com/cerberauth/cache-detective.git
+   cd cache-detective
+   ```
+
+2. Build the image using the dev Dockerfile:
+
+   ```sh
+   docker build -f .docker/Dockerfile-build -t cache-detective .
+   ```
+
+3. Run it:
+
+   ```sh
+   docker run --rm cache-detective scan --url https://example.com/
+   ```
+
+</Steps>
+
+## GitHub Actions
+
+To run `cache-detective` in CI, see the [GitHub Actions guide](./github-actions/). To use the container image directly in a workflow step:
+
+```yaml
+- name: Scan for cache misconfigurations
+  run: docker run --rm ghcr.io/cerberauth/cache-detective scan --url https://staging.example.com/ --output-format json --output report.json
+```

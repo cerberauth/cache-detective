@@ -15,6 +15,7 @@ import (
 	"github.com/cerberauth/cache-detective/cache/checks/cacheability"
 	"github.com/cerberauth/cache-detective/cache/checks/fingerprint"
 	"github.com/cerberauth/cache-detective/cache/checks/livestate"
+	"github.com/cerberauth/cache-detective/cache/checks/security"
 )
 
 type fakeResolver struct {
@@ -41,7 +42,14 @@ func TestCheck_CNAMEFingerprint(t *testing.T) {
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
 
 	engine := harnessx.New()
-	require.NoError(t, engine.Register(checkbase.DiscoveryCheck, cacheability.Check, livestate.Check, fingerprint.Check))
+	// cacheability.Def (a livestate.Def dependency, which fingerprint.Def
+	// depends on) depends on the full §5 security-check chain — see
+	// cacheability.Def's DependsOn comment.
+	require.NoError(t, engine.Register(
+		checkbase.DiscoveryCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		cacheability.Check, livestate.Check, fingerprint.Check,
+	))
 
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)

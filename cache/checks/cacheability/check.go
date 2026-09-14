@@ -19,7 +19,17 @@ var Def = checkbase.CheckDef{
 	Name:        "Cacheability Analysis",
 	Description: "Parses Cache-Control/Expires/Pragma/Vary and RFC 9111 status/method defaults to determine whether a response is cacheable, flagging conflicting directives and missing validators.",
 	Tags:        []string{"cacheability", "rfc9111"},
-	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
+	// DependsOn ResponseSplittingCheck (the tail of the §5 ordering chain —
+	// see security.ResponseSplittingDef), not just Discovery: this check's
+	// own baseline request is a plain, unpoisoned GET, and harnessx runs
+	// same-level checks concurrently. Against a target with a single-slot
+	// (low-cardinality) cache, that plain GET can win the race and
+	// permanently fill the slot with a clean response before a poisoning
+	// check gets a chance to plant its own — masking a real finding.
+	DependsOn: []string{
+		string(checkbase.CheckIDDiscovery),
+		string(checkbase.CheckIDResponseSplitting),
+	},
 }
 
 // AuthDef describes the authenticated-cacheable security check.

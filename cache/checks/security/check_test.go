@@ -85,7 +85,7 @@ func TestCacheDeceptionCheck_DetectsPathConfusion(t *testing.T) {
 	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "account", URL: srv.URL + "/account"}}
 
-	engine := newEngine(t, security.CacheDeceptionCheck)
+	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck)
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)
 
@@ -109,7 +109,7 @@ func TestErrorCachingCheck_FlagsCacheableError(t *testing.T) {
 	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
 
-	engine := newEngine(t, security.ErrorCachingCheck)
+	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck)
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)
 
@@ -138,7 +138,7 @@ func TestResponseSplittingCheck_DetectsInjectedHeader(t *testing.T) {
 	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
 
-	engine := newEngine(t, security.UnkeyedHeaderCheck, security.ResponseSplittingCheck)
+	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck)
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)
 

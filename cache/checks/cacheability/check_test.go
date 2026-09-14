@@ -8,6 +8,7 @@ import (
 
 	"github.com/cerberauth/cache-detective/cache/checkbase"
 	"github.com/cerberauth/cache-detective/cache/checks/cacheability"
+	"github.com/cerberauth/cache-detective/cache/checks/security"
 	"github.com/cerberauth/harnessx"
 	"github.com/cerberauth/harnessx/probe"
 	"github.com/stretchr/testify/assert"
@@ -17,7 +18,14 @@ import (
 func runChecks(t *testing.T, pctx *checkbase.ProbeCtx, target string) harnessx.ScanSummary {
 	t.Helper()
 	engine := harnessx.New()
-	require.NoError(t, engine.Register(checkbase.DiscoveryCheck, cacheability.Check, cacheability.AuthCheck))
+	// cacheability.Def depends on the full §5 security-check chain (see its
+	// DependsOn doc comment), so every check in that chain must be
+	// registered alongside it for harnessx to resolve the dependency graph.
+	require.NoError(t, engine.Register(
+		checkbase.DiscoveryCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		cacheability.Check, cacheability.AuthCheck,
+	))
 
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: target}}
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: target, Data: pctx})

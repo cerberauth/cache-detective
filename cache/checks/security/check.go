@@ -16,6 +16,7 @@ import (
 	"github.com/cerberauth/harnessx/checkdef"
 
 	"github.com/cerberauth/cache-detective/cache/checkbase"
+	"github.com/cerberauth/cache-detective/cache/checks/cacheability"
 )
 
 // securityTag is applied to every CheckDef in this package.
@@ -132,11 +133,18 @@ var CacheDeceptionDef = checkbase.CheckDef{
 	Name:        "Cache Deception",
 	Description: "Appends a static-file extension / nonexistent sub-path to the resource path and checks whether the (potentially authenticated) origin response gets cached under that URL.",
 	Tags:        []string{securityTag, "cache-deception"},
-	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
-	CVSSVector:  "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N",
-	CVSSScore:   8.1,
-	CWEID:       "CWE-524",
-	OWASP:       "A01:2021-Broken Access Control",
+	// DependsOn UnkeyedHeaderCheck, not just Discovery: both checks issue a
+	// plain baseline GET at the same resource, and harnessx runs same-level
+	// checks concurrently. Against a single-slot demo cache, this check's
+	// own baseline request landing between UnkeyedHeaderCheck's poison and
+	// confirm requests would silently overwrite the poisoned entry with a
+	// clean one, masking that finding. See ResponseSplittingDef below for
+	// the same reasoning.
+	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDUnkeyedHeader)},
+	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N",
+	CVSSScore:  8.1,
+	CWEID:      "CWE-524",
+	OWASP:      "A01:2021-Broken Access Control",
 }
 
 var CacheDeceptionCheck = checkdef.NewResourceCheck(CacheDeceptionDef, runCacheDeception)
@@ -179,7 +187,7 @@ func runCacheDeception(ctx context.Context, target harnessx.Target, resource har
 			continue
 		}
 
-		if ex.StatusCode == base.StatusCode && string(ex.Body) == string(base.Body) && cacheableResponse(ex.Header) {
+		if ex.StatusCode == base.StatusCode && string(ex.Body) == string(base.Body) && cacheableResponse(ex.Method, ex.StatusCode, ex.Header) {
 			obs = append(obs, harnessx.Observation{
 				CheckID:     checkbase.CheckIDCacheDeception,
 				ResourceID:  resource.ID,
@@ -194,12 +202,14 @@ func runCacheDeception(ctx context.Context, target harnessx.Target, resource har
 	return harnessx.Result{Observations: obs}, nil
 }
 
-func cacheableResponse(h http.Header) bool {
-	cc := strings.ToLower(h.Get("Cache-Control"))
-	if strings.Contains(cc, "no-store") {
-		return false
-	}
-	return strings.Contains(cc, "public") || strings.Contains(cc, "max-age") || h.Get("Expires") != ""
+// cacheableResponse defers to the same RFC 9111 analysis the cacheability
+// check (§1) uses, rather than a header-substring heuristic: a response with
+// no Cache-Control at all is still cacheable by default status/method
+// semantics (e.g. a bare 200 GET), which is exactly the case a static-file
+// path-confusion deception exploits — the deceptive path never sets its own
+// Cache-Control, it just rides the origin's default cacheability.
+func cacheableResponse(method string, statusCode int, h http.Header) bool {
+	return cacheability.Analyze(method, statusCode, h, false).Cacheable
 }
 
 // --- Error-response caching (§5) -------------------------------------------
@@ -209,10 +219,15 @@ var ErrorCachingDef = checkbase.CheckDef{
 	Name:        "Error Response Caching",
 	Description: "Requests a resource with a deliberately invalid Accept/cache-buster to provoke a 4xx/5xx and checks whether the error response itself is cached longer than intended.",
 	Tags:        []string{securityTag, "error-caching"},
-	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
-	CVSSVector:  "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
-	CVSSScore:   5.3,
-	CWEID:       "CWE-524",
+	// DependsOn CacheDeceptionCheck (and transitively UnkeyedHeaderCheck),
+	// not just Discovery — same same-level-race reasoning as
+	// CacheDeceptionDef above: this check's own request to the resource
+	// could otherwise land between another security check's poison/confirm
+	// pair and mask its finding.
+	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDCacheDeception)},
+	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
+	CVSSScore:  5.3,
+	CWEID:      "CWE-524",
 }
 
 var ErrorCachingCheck = checkdef.NewResourceCheck(ErrorCachingDef, runErrorCaching)
@@ -261,14 +276,16 @@ var ResponseSplittingDef = checkbase.CheckDef{
 	Name:        "Response Splitting via Cache-Key Manipulation",
 	Description: "Injects a CRLF-encoded header/path fragment into an unkeyed input and checks whether it's reflected as literal injected headers in the (potentially cached) response — HTTP response splitting exploitable through the cache.",
 	Tags:        []string{securityTag, "cache-poisoning", "response-splitting"},
-	// Depends on UnkeyedHeaderCheck, not just discovery: both checks poison
-	// the same unkeyed inputs (X-Forwarded-Host among them) on the same
-	// resource, and harnessx runs same-level checks concurrently — without
-	// this ordering, one check's poison request can land between the
-	// other's poison/confirm pair and mask its finding. Every §5 check that
-	// manipulates the same unkeyed input on a live target needs this same
-	// care; it isn't unique to cache-detective's test suite.
-	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDUnkeyedHeader)},
+	// Depends on ErrorCachingCheck (and transitively CacheDeceptionCheck,
+	// UnkeyedHeaderCheck), not just discovery: every §5 check probes or
+	// poisons the same resource, and harnessx runs same-level checks
+	// concurrently — without a full chain of ordering, one check's request
+	// can land between another's poison/confirm pair and mask its finding.
+	// This DependsOn chain (UnkeyedHeader -> CacheDeception -> ErrorCaching
+	// -> ResponseSplitting) runs every §5 check strictly one at a time
+	// against a given resource; it isn't unique to cache-detective's test
+	// suite.
+	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDErrorCaching)},
 	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
 	CVSSScore:  9.3,
 	CWEID:      "CWE-113",

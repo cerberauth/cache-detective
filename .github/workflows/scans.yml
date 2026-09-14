@@ -123,3 +123,118 @@ jobs:
             fi
             echo "No finding for the fixed /poison fixture, as expected"
           fi
+
+  run-scan-challenges:
+    name: Scan challenge - ${{ matrix.challenge }} (${{ matrix.vulnerable && 'vulnerable' || 'not vulnerable' }})
+    runs-on: ubuntu-latest
+    needs: build
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - challenge: "cache-conditional-validators"
+            path: "/resource"
+            vulnerable: true
+            expect_title: "Conditional request not honored"
+          - challenge: "cache-conditional-validators"
+            path: "/resource"
+            vulnerable: false
+            expect_title: "Conditional request not honored"
+          - challenge: "cache-control-directive-validation"
+            path: "/report"
+            vulnerable: true
+            expect_title: "Conflicting Cache-Control directives"
+          - challenge: "cache-control-directive-validation"
+            path: "/report"
+            vulnerable: false
+            expect_title: "Conflicting Cache-Control directives"
+          - challenge: "cache-deception-static-extension"
+            path: "/profile"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Cache deception via path confusion"
+          - challenge: "cache-deception-static-extension"
+            path: "/profile"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Cache deception via path confusion"
+          - challenge: "cache-poisoning-unkeyed-header"
+            path: "/"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Unkeyed header injection"
+          - challenge: "cache-poisoning-unkeyed-header"
+            path: "/"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Unkeyed header injection"
+          - challenge: "cache-sensitive-data-exposure"
+            path: "/dashboard"
+            vulnerable: true
+            scan_args: "--aggressive --cookie session=cache-detective-scan"
+            expect_title: "Authenticated response marked cacheable"
+          - challenge: "cache-sensitive-data-exposure"
+            path: "/dashboard"
+            vulnerable: false
+            scan_args: "--aggressive --cookie session=cache-detective-scan"
+            expect_title: "Authenticated response marked cacheable"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run challenge server
+        run: docker run -d -p 8080:8080 ghcr.io/cerberauth/api-vulns-challenges/${{ matrix.challenge }}:latest serve --vulnerable=${{ matrix.vulnerable }}
+
+      - name: Wait for challenge server
+        # A plain TCP check, not an HTTP GET against matrix.path: some of
+        # these challenges simulate a permanent, single-slot cache with no
+        # TTL — the very first request ever made to the resource freezes
+        # its cached response for the container's lifetime. An HTTP
+        # readiness probe against the tested path would itself become that
+        # first request and silently pre-poison the fixture before the
+        # scan below gets a chance to.
+        run: |
+          for i in $(seq 1 40); do (exec 3<>/dev/tcp/localhost/8080) 2>/dev/null && exec 3<&- 3>&- && break; sleep 0.25; done
+
+      - name: Download binary
+        uses: actions/download-artifact@v8
+        with:
+          name: cache-detective
+
+      - name: Prepare binary
+        run: chmod +x cache-detective
+
+      - name: Scan
+        run: |
+          ./cache-detective scan --url "http://localhost:8080${{ matrix.path }}" --requests 1 ${{ matrix.scan_args }} --sqa-opt-out \
+            --output-format json --output challenge-report.json --quiet
+
+      - name: Check result matches expected vulnerability state
+        run: |
+          count=$(jq --arg t "${{ matrix.expect_title }}" '[.findings[] | select(.title == $t or (.title | startswith($t)))] | length' challenge-report.json)
+          if [ "${{ matrix.vulnerable }}" = "true" ]; then
+            if [ "$count" -eq 0 ]; then
+              echo "::error::No \"${{ matrix.expect_title }}\" finding for the vulnerable ${{ matrix.challenge }} challenge"
+              exit 1
+            fi
+            echo "Found $count finding(s) for the vulnerable ${{ matrix.challenge }} challenge, as expected"
+          else
+            if [ "$count" -gt 0 ]; then
+              echo "::error::Unexpected \"${{ matrix.expect_title }}\" finding for the fixed ${{ matrix.challenge }} challenge"
+              jq '.findings[] | .title' challenge-report.json
+              exit 1
+            fi
+            echo "No \"${{ matrix.expect_title }}\" finding for the fixed ${{ matrix.challenge }} challenge, as expected"
+          fi
+
+      - name: Stop challenge server
+        if: ${{ always() }}
+        run: docker stop $(docker ps -q --filter ancestor=ghcr.io/cerberauth/api-vulns-challenges/${{ matrix.challenge }}:latest)

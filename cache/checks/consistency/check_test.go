@@ -14,6 +14,7 @@ import (
 	"github.com/cerberauth/cache-detective/cache/checkbase"
 	"github.com/cerberauth/cache-detective/cache/checks/cacheability"
 	"github.com/cerberauth/cache-detective/cache/checks/consistency"
+	"github.com/cerberauth/cache-detective/cache/checks/security"
 )
 
 func runCheck(t *testing.T, handler http.HandlerFunc) (harnessx.ScanSummary, string) {
@@ -25,7 +26,13 @@ func runCheck(t *testing.T, handler http.HandlerFunc) (harnessx.ScanSummary, str
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
 
 	engine := harnessx.New()
-	require.NoError(t, engine.Register(checkbase.DiscoveryCheck, cacheability.Check, consistency.Check))
+	// cacheability.Def (a consistency.Def dependency) depends on the full
+	// §5 security-check chain — see cacheability.Def's DependsOn comment.
+	require.NoError(t, engine.Register(
+		checkbase.DiscoveryCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		cacheability.Check, consistency.Check,
+	))
 
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)

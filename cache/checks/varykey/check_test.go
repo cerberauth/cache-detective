@@ -12,8 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cerberauth/cache-detective/cache/checkbase"
+	"github.com/cerberauth/cache-detective/cache/checks/security"
 	"github.com/cerberauth/cache-detective/cache/checks/varykey"
 )
+
+// securityChain is every §5 check varykey.Def transitively depends on (see
+// its DependsOn doc comment), registered alongside it so harnessx can
+// resolve the dependency graph in tests.
+var securityChain = []harnessx.Check{
+	security.UnkeyedHeaderCheck,
+	security.CacheDeceptionCheck,
+	security.ErrorCachingCheck,
+	security.ResponseSplittingCheck,
+}
 
 func TestCheck_UndeclaredUserAgentKeying(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +38,7 @@ func TestCheck_UndeclaredUserAgentKeying(t *testing.T) {
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
 
 	engine := harnessx.New()
-	require.NoError(t, engine.Register(checkbase.DiscoveryCheck, varykey.Check))
+	require.NoError(t, engine.Register(append([]harnessx.Check{checkbase.DiscoveryCheck, varykey.Check}, securityChain...)...))
 
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)
@@ -61,7 +72,7 @@ func TestCheck_DeclaredVaryWithNoEffect(t *testing.T) {
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
 
 	engine := harnessx.New()
-	require.NoError(t, engine.Register(checkbase.DiscoveryCheck, varykey.Check))
+	require.NoError(t, engine.Register(append([]harnessx.Check{checkbase.DiscoveryCheck, varykey.Check}, securityChain...)...))
 
 	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
 	require.NoError(t, err)

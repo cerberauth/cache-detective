@@ -30,9 +30,19 @@ import (
 var Def = checkbase.CheckDef{
 	ID:          string(checkbase.CheckIDVaryKey),
 	Name:        "Cache Key & Vary Analysis",
-	Description: "Probes what varies the cache key: declared Vary headers, and whether Accept-Encoding/Accept-Language/User-Agent/a custom header are actually keyed.",
+	Description: "Probes what varies the cache key: declared Vary headers, and whether Accept-Encoding/Accept-Language/User-Agent/Cookie/a custom header are actually keyed.",
 	Tags:        []string{"vary", "cache-key"},
-	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
+	// DependsOn ResponseSplittingCheck (the tail of the §5 ordering chain —
+	// see security.ResponseSplittingDef), not just Discovery: this check
+	// issues its own plain baseline request, and harnessx runs same-level
+	// checks concurrently. Against a target with a single-slot cache, that
+	// plain GET can win the race and permanently fill the slot with a
+	// clean response before a poisoning check gets a chance to plant its
+	// own — masking a real finding.
+	DependsOn: []string{
+		string(checkbase.CheckIDDiscovery),
+		string(checkbase.CheckIDResponseSplitting),
+	},
 }
 
 // Check runs cache-key analysis against each discovered resource.
@@ -109,6 +119,29 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 		})
 	}
 
+	// Cookie is only probed when the caller supplied at least one (e.g.
+	// --cookie session=alice), since a scan with no cookies has nothing to
+	// vary the value of. Every configured cookie's value is perturbed at
+	// once (rather than added via the generic `dimensions` header-overwrite
+	// path, which would replace rather than vary it) and compared against
+	// the same-cookie baseline response.
+	if budget > 0 && len(pctx.Cookies) > 0 {
+		req, err := cookieProbeRequest(ctx, resource.URL, pctx)
+		if err == nil {
+			ex, err := checkbase.Do(ctx, pctx, req)
+			if err == nil {
+				declared := containsFold(res.DeclaredVary, "cookie")
+				observedDiff := differs(base, ex)
+				res.Probes = append(res.Probes, Probe{
+					Dimension: "cookie",
+					Declared:  declared,
+					Keyed:     observedDiff,
+					Evidence:  fmt.Sprintf("declared in Vary: %v, observed response change: %v", declared, observedDiff),
+				})
+			}
+		}
+	}
+
 	obs := findingsFrom(res, resource.ID)
 	return harnessx.Result{Data: res, Observations: obs}, nil
 }
@@ -164,6 +197,22 @@ func parseVary(header string) []string {
 		}
 	}
 	return out
+}
+
+// cookieProbeRequest builds a request identical to the baseline except every
+// configured cookie's value carries a "-cd-probe" suffix, so a shared cache
+// that keys purely on path (ignoring Cookie) can be caught serving one
+// caller's cookie-dependent content to another.
+func cookieProbeRequest(ctx context.Context, url string, pctx *checkbase.ProbeCtx) (*http.Request, error) {
+	req, err := checkbase.NewRequest(ctx, url, pctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Del("Cookie")
+	for _, c := range pctx.Cookies {
+		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value + "-cd-probe"}) //nolint:gosec // G124: outgoing probe cookie, not a response cookie
+	}
+	return req, nil
 }
 
 func containsFold(list []string, want string) bool {

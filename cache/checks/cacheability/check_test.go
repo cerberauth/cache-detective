@@ -55,7 +55,9 @@ func TestCheck_CacheableResponse(t *testing.T) {
 
 func TestCheck_AuthenticatedCacheableFlagsFinding(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=600")
+		// No must-revalidate/public/s-maxage: RFC 9111 §3.5 gives a shared
+		// cache no explicit permission to store this despite Authorization.
+		w.Header().Set("Cache-Control", "max-age=600")
 		w.Header().Set("ETag", `"v1"`)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -68,6 +70,42 @@ func TestCheck_AuthenticatedCacheableFlagsFinding(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, res.Observations, 1)
 	assert.Equal(t, "Authenticated response marked cacheable", res.Observations[0].Title)
+	assert.Equal(t, checkbase.SeverityHigh, res.Observations[0].Metadata[checkbase.SeverityKey])
+}
+
+func TestCheck_AuthenticatedCacheableWithSensitiveBodyEscalatesSeverity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=600")
+		w.Header().Set("ETag", `"v1"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"email":"user@example.com"}`))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), BearerToken: "secret-token"}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
+	require.True(t, ok)
+	require.Len(t, res.Observations, 1)
+	assert.Equal(t, checkbase.SeverityCritical, res.Observations[0].Metadata[checkbase.SeverityKey])
+}
+
+func TestCheck_AuthenticatedPublicExplicitlyPermittedNotFlagged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// public is one of the RFC 9111 §3.5 opt-in directives.
+		w.Header().Set("Cache-Control", "public, max-age=600")
+		w.Header().Set("ETag", `"v1"`)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), BearerToken: "secret-token"}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
+	require.True(t, ok)
+	assert.Empty(t, res.Observations)
 }
 
 func TestCheck_AuthenticatedPrivateNotFlagged(t *testing.T) {

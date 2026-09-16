@@ -25,14 +25,17 @@ Analyzes a single response's headers to determine whether it's cacheable per [RF
 | Confusing Cache-Control directives | low | `private` combined with `s-maxage` (the latter has no effect) |
 | Legacy Pragma fallback in use | info | Caching relies solely on `Pragma: no-cache`, no `Cache-Control` present |
 | Cacheable response missing validators | low | Cacheable, but neither `ETag` nor `Last-Modified` is present |
-| **Authenticated response marked cacheable** | **high** | The request carried a bearer token or cookies (`--bearer`/`--cookie`) and the response is cacheable without `private`/`no-store` — see below |
+| **Authenticated response marked cacheable** | **high**, escalated to **critical** when the body/headers carry PII, tokens, or `Set-Cookie` | The request carried a bearer token or cookies (`--bearer`/`--cookie`) and the response is cacheable by a shared cache without an [RFC 9111 §3.5](https://www.rfc-editor.org/rfc/rfc9111#section-3.5) opt-in directive — see below |
 
 ## Authenticated response marked cacheable
 
-This is the one security-relevant finding in this area, and it's reported as its own check (`authenticated-cacheable`, CWE-524, CVSS 8.1) so it carries real severity metadata distinct from the informational findings above. It fires when:
+This is the one security-relevant finding in this area, and it's reported as its own check (`authenticated-cacheable`, CWE-524, CVSS 8.1) so it carries real severity metadata distinct from the informational findings above. Per [RFC 9111 §3.5](https://www.rfc-editor.org/rfc/rfc9111#section-3.5), a shared cache must not store a response to a request carrying `Authorization` unless the response itself explicitly opts back in. The finding fires when:
 
 - `--bearer` or `--cookie` was set (or the check's own auth-scoped request otherwise marks itself authenticated), **and**
 - the response is cacheable, **and**
-- it carries neither `Cache-Control: private` nor `no-store`
+- it carries neither `Cache-Control: private` nor `no-store`, **and**
+- it carries none of the three RFC 9111 §3.5 opt-in directives: `must-revalidate`, `public`, `s-maxage`
 
-A shared cache/CDN sitting in front of the origin may then serve that authenticated response to a different user.
+A shared cache/CDN sitting in front of the origin may then store and serve that authenticated response to a different user.
+
+The finding's base severity is `high`. It's escalated to `critical` (in `Observation.Metadata["severity"]`, and hence in each output format's per-finding metadata — see [`--output-format`](../../cli/scan/)) when the response body or headers actually carry something concretely sensitive: an email address, a JWT, a `credit_card`/`api_key`/`password`/... field, a credit-card-shaped number, an SSN, or a `Set-Cookie` header. This distinguishes a theoretical misconfiguration from one that's already leaking real user data if a shared cache stores it.

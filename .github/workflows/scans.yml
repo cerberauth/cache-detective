@@ -258,6 +258,11 @@ jobs:
             echo "No \"${{ matrix.expect_title }}\" finding for the fixed ${{ matrix.challenge }} challenge, as expected"
           fi
 
+      - name: Check authenticated-cacheable severity escalates on sensitive content
+        if: ${{ matrix.challenge == 'cache-sensitive-data-exposure' && matrix.vulnerable }}
+        run: |
+          jq -e '[.findings[] | select(.title == "Authenticated response marked cacheable") | select(.extra.severity == "critical")] | length > 0' challenge-report.json
+
       - name: Stop challenge server
         if: ${{ always() }}
         run: docker stop $(docker ps -q --filter ancestor=ghcr.io/cerberauth/api-vulns-challenges/${{ matrix.challenge }}:latest)

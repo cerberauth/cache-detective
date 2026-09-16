@@ -32,12 +32,15 @@ var Def = checkbase.CheckDef{
 	},
 }
 
-// AuthDef describes the authenticated-cacheable security check.
+// AuthDef describes the authenticated-cacheable security check: RFC 9111
+// §3.5 — a shared cache MUST NOT store a response to a request carrying
+// Authorization unless the response itself carries must-revalidate, public,
+// or s-maxage, explicitly opting back in.
 var AuthDef = checkbase.CheckDef{
 	ID:          string(checkbase.CheckIDAuthCacheable),
 	Name:        "Authenticated Response Marked Cacheable",
-	Description: "Flags a response sent with credentials (bearer token or cookies) that is nonetheless cacheable by shared caches — a common cause of cross-user information disclosure.",
-	Tags:        []string{"cacheability", "security"},
+	Description: "Flags a response sent with credentials (bearer token or cookies) that a shared cache may store despite carrying none of the RFC 9111 §3.5 opt-in directives (must-revalidate, public, s-maxage) — a common cause of cross-user information disclosure. Severity escalates when the response body/headers carry PII, tokens, or Set-Cookie.",
+	Tags:        []string{"cacheability", "security", "rfc9111"},
 	CVSSVector:  "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N",
 	CVSSScore:   8.1,
 	CWEID:       "CWE-524",
@@ -67,6 +70,8 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 	}
 
 	analysis := Analyze(ex.Method, ex.StatusCode, ex.Header, pctx.Authenticated)
+	analysis.Body = ex.Body
+	analysis.SetCookie = ex.Header.Values("Set-Cookie")
 	obs := analysis.Findings
 	for i := range obs {
 		obs[i].CheckID = checkbase.CheckIDCacheability
@@ -85,16 +90,42 @@ func runAuth(_ context.Context, _ harnessx.Target, resource harnessx.Resource, s
 		return harnessx.Result{Skipped: true, SkipReason: "cacheability result carried no analysis data"}, nil
 	}
 
-	if !analysis.Authenticated || !analysis.Cacheable || analysis.CacheControl.Private || analysis.CacheControl.NoStore {
+	cc := analysis.CacheControl
+	if !analysis.Authenticated || !analysis.Cacheable || cc.Private || cc.NoStore {
 		return harnessx.Result{}, nil
+	}
+	// RFC 9111 §3.5: must-revalidate, public, or s-maxage on the response
+	// explicitly opts a shared cache back into storing it despite the
+	// request carrying Authorization. Any other combination is a violation.
+	if cc.MustRevalidate || cc.Public || cc.SMaxAge != nil {
+		return harnessx.Result{}, nil
+	}
+
+	severity := checkbase.SeverityHigh
+	description := "the request carried credentials (bearer token or cookie) and the response is cacheable but carries none of the RFC 9111 §3.5 opt-in directives (must-revalidate, public, s-maxage) — a shared cache/CDN in front of the origin may store and serve it to other users"
+	evidence := analysis.CacheControl.Raw()
+
+	if reasons := DetectSensitiveData(analysis.Body, analysis.SetCookie); len(reasons) > 0 {
+		severity = checkbase.SeverityCritical
+		description += "; the response also carries sensitive content that would be exposed to other users if cached: " + joinReasons(reasons)
+		evidence += "; " + joinReasons(reasons)
 	}
 
 	obs := harnessx.Observation{
 		CheckID:     checkbase.CheckIDAuthCacheable,
 		ResourceID:  resource.ID,
 		Title:       "Authenticated response marked cacheable",
-		Description: "the request carried credentials (bearer token or cookie) but the response has no Cache-Control: private/no-store, so a shared cache/CDN in front of the origin may serve it to other users",
-		Evidence:    analysis.CacheControl.Raw(),
+		Description: description,
+		Evidence:    evidence,
+		Metadata:    map[string]string{checkbase.SeverityKey: severity},
 	}
 	return harnessx.Result{Observations: []harnessx.Observation{obs}}, nil
+}
+
+func joinReasons(reasons []string) string {
+	out := reasons[0]
+	for _, r := range reasons[1:] {
+		out += ", " + r
+	}
+	return out
 }

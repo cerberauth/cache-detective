@@ -32,7 +32,7 @@
 |---------|:---:|
 | Single-URL, list-file, sitemap, `.har`, or same-origin crawl input | ✓ |
 | Cache-Control/Expires/Pragma/Vary parsing (RFC 9111) | ✓ |
-| Authenticated-but-cacheable misconfiguration detection | ✓ |
+| Authenticated-but-cacheable misconfiguration detection (RFC 9111 §3.5), severity escalation on PII/token/`Set-Cookie` exposure | ✓ |
 | Live HIT/MISS/STALE/EXPIRED/BYPASS state detection | ✓ |
 | CDN/reverse-proxy fingerprinting (CNAME + Server/Via) | ✓ |
 | Declared vs. observed cache-key (`Vary`) analysis | ✓ |
@@ -255,7 +255,7 @@ Each numbered section below is one `harnessx.Check` (or a small family of them),
 
 | § | Package | What it does |
 |---|---------|--------------|
-| 1 | `cache/checks/cacheability` | Cache-Control/Expires/Pragma/Vary parsing, RFC 9111 status/method defaults, conflicting-directive and missing-validator findings, plus a split-out `AuthCheck` for the authenticated-but-cacheable security finding |
+| 1 | `cache/checks/cacheability` | Cache-Control/Expires/Pragma/Vary parsing, RFC 9111 status/method defaults, conflicting-directive and missing-validator findings, plus a split-out `AuthCheck` implementing RFC 9111 §3.5 — an authenticated (`Authorization`/cookie) response is flagged as cacheable-by-a-shared-cache unless it carries `must-revalidate`, `public`, or `s-maxage`; severity escalates from `high` to `critical` (`Observation.Metadata["severity"]`) when the response body/headers carry PII, tokens, or `Set-Cookie` |
 | 2 | `cache/checks/livestate` | Multi-request HIT/MISS/STALE/EXPIRED/BYPASS detection via the CDN registry, with a timing/Age heuristic fallback |
 | 3 | `cache/checks/fingerprint` | CNAME chain resolution + Server/Via matching (via the CDN registry) + multi-tier cache evidence |
 | 4 | `cache/checks/varykey` | Declared-`Vary` vs. observed cache-key inclusion for Accept-Encoding/Accept-Language/User-Agent/a custom header |

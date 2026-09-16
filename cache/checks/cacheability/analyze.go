@@ -34,6 +34,15 @@ type AnalysisResult struct {
 
 	Authenticated bool
 
+	// Body is the response body, captured only so the authenticated-cacheable
+	// check (AuthCheck) can scan it for PII/token/credential exposure without
+	// re-requesting the resource. Not otherwise used by cacheability analysis.
+	Body []byte
+
+	// SetCookie holds any Set-Cookie header values from the response, for the
+	// same reason as Body above.
+	SetCookie []string
+
 	// Findings are the misconfigurations/notable observations detected
 	// during analysis (conflicting directives, missing validators, ...).
 	// The authenticated-cacheable finding is deliberately excluded here —

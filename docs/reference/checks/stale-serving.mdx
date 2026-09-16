@@ -1,0 +1,35 @@
+---
+title: Stale-serving behavior
+description: Confirms RFC 5861 stale-while-revalidate / stale-if-error directives are actually honored.
+sidebar:
+  order: 8
+---
+
+Cache-Control's `stale-while-revalidate` and `stale-if-error` directives ([RFC 5861](https://www.rfc-editor.org/rfc/rfc5861)) tell a cache it's allowed to serve stale content while it refreshes in the background, or when the origin is failing. This check confirms the fronting cache actually does that, instead of just trusting the directives' presence — see [Cacheability analysis](../cacheability/) for the directive parsing itself.
+
+It only runs against a resource that already declares `stale-while-revalidate` and/or `stale-if-error`; a resource without either is skipped entirely.
+
+## stale-while-revalidate
+
+1. Requests the resource once to get a baseline response and its freshness lifetime (`s-maxage`, falling back to `max-age`, falling back to `Expires` minus `Date`).
+2. Waits for the resource to enter its stale-while-revalidate window, then requests it again: a cache serving stale content promptly (same body, comparable latency to the baseline) confirms the directive is honored; a response that took meaningfully longer or changed content suggests the cache blocked on a synchronous origin refetch instead.
+3. If honored, waits again and requests once more, checking for evidence (a lower `Age`, or updated content) that the expected background revalidation actually happened.
+
+Waiting for the window is capped by `--stale-window-max-wait` (default `30s`) — a resource with a longer freshness lifetime than that still gets its directives reported, just not behaviorally confirmed.
+
+| Finding | Severity | Meaning |
+|---|---|---|
+| stale-while-revalidate window too large to actively confirm | info | The freshness lifetime exceeds `--stale-window-max-wait`; directive presence/window is reported, but behavior wasn't tested |
+| stale-while-revalidate not honored | low | A request inside the stale window didn't get a prompt stale response — the cache appears to block on synchronous revalidation |
+| stale-while-revalidate did not trigger a background refresh | low | Stale content was served, but a follow-up request showed no sign the background revalidation happened |
+
+## stale-if-error
+
+Confirming `stale-if-error` means asking the origin to fail, so — like the [cache poisoning & deception](../cache-poisoning-and-deception/) checks — this only runs under `--aggressive`. It sends a probe header (`X-Cache-Detective-Simulate-Error`) that an instrumented origin or test fixture can use to simulate a failure; a real, uninstrumented origin simply ignores it, in which case the result stays inconclusive rather than being reported either way.
+
+| Finding | Severity | Meaning |
+|---|---|---|
+| stale-if-error confirmation requires --aggressive | info | `stale-if-error` is declared but wasn't tested; re-run with `--aggressive` |
+| stale-if-error not honored | medium | Simulating an origin failure returned a 5xx instead of the last known-good response |
+
+**Not tested at all against most production origins:** without cooperation from the origin, cache-detective can't force a real 5xx/timeout/DNS failure, so a scan against an uninstrumented target reports no `stale-if-error` finding either way rather than a false "honored"/"not honored" verdict.

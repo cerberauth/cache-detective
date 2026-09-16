@@ -75,6 +75,13 @@ type ProbeCtx struct {
 	// this into the harnessx.Resource list every per-resource check runs
 	// against.
 	Resources []ResourceSpec
+
+	// StaleWindowMaxWait caps how long the stale-serving check (§9) will
+	// wait for a resource to enter its declared stale-while-revalidate
+	// window before giving up on actively confirming the behavior. A
+	// resource whose freshness lifetime exceeds this budget still gets its
+	// directives reported, just not behaviorally confirmed.
+	StaleWindowMaxWait time.Duration
 }
 
 // SeverityKey is the Observation.Metadata key every check uses to attach an
@@ -128,6 +135,9 @@ func (c ProbeCtx) WithDefaults() ProbeCtx {
 	if c.MaxAggressiveRequests <= 0 {
 		c.MaxAggressiveRequests = 10
 	}
+	if c.StaleWindowMaxWait <= 0 {
+		c.StaleWindowMaxWait = 30 * time.Second
+	}
 	if c.BearerToken != "" || len(c.Cookies) > 0 {
 		c.Authenticated = true
 	}
@@ -159,6 +169,9 @@ const (
 	CheckIDResponseSplitting harnessx.CheckID = "response-splitting"
 	// CheckIDConsistency is the §6 response-consistency & correctness check.
 	CheckIDConsistency harnessx.CheckID = "consistency"
+	// CheckIDStaleServing is the §9 stale-while-revalidate/stale-if-error
+	// behavior check (RFC 5861).
+	CheckIDStaleServing harnessx.CheckID = "stale-serving"
 	// CheckIDAuthCacheable is the security-relevant "authenticated response
 	// marked cacheable" misconfiguration check, split out from
 	// CheckIDCacheability so it can carry its own CVSS/CWE severity.

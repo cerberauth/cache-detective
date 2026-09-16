@@ -41,6 +41,8 @@
 | Error-response caching probing | `--aggressive` |
 | Response splitting probing | `--aggressive` |
 | Conditional-request (304) validation, redirect caching | ✓ |
+| stale-while-revalidate behavior confirmation (RFC 5861) | ✓ |
+| stale-if-error behavior confirmation (RFC 5861) | `--aggressive` |
 | JSON output + drift detection between two scans (`diff`) | ✓ |
 
 ---
@@ -243,7 +245,7 @@ Exits `1` when any finding was added or changed severity.
 
 ## Safety defaults
 
-Every check that could pollute a shared cache — unkeyed header injection, cache deception path-confusion, error-response caching, response splitting — is gated behind `--aggressive`. `--max-aggressive-requests` hard-caps extra requests per resource even with `--aggressive` set, and `--respect-robots` (on by default for `--crawl`) honors `robots.txt`.
+Every check that could pollute a shared cache — unkeyed header injection, cache deception path-confusion, error-response caching, response splitting — is gated behind `--aggressive`. Stale-if-error confirmation (§9) is gated the same way, since confirming it means asking the origin to simulate a failure. `--max-aggressive-requests` hard-caps extra requests per resource even with `--aggressive` set, and `--respect-robots` (on by default for `--crawl`) honors `robots.txt`.
 
 ---
 
@@ -261,9 +263,12 @@ Each numbered section below is one `harnessx.Check` (or a small family of them),
 | 6 | `cache/checks/consistency` | Conditional-request (304) validation, redirect caching |
 | 7 | `cache/crawl` | URL list / sitemap / `.har` import / same-origin crawl with scope + `robots.txt` courtesy, resolved **before** the engine runs |
 | 8 | `cache/geo` | `Provider` interface + `NoopProvider` for future multi-region probing — no real geo backend ships in v1 |
+| 9 | `cache/checks/staleserving` | Confirms declared `stale-while-revalidate`/`stale-if-error` (RFC 5861) are actually honored by the fronting cache — `stale-if-error` confirmation is `--aggressive`-gated, since it means simulating an origin failure |
 | — | `cache/cdn` | The extensible CDN signature table (Cloudflare, Fastly, Akamai, CloudFront, Varnish, Vercel, Netlify, Pantheon, ...) every detection/fingerprint check reads from |
 | — | `cache/checkbase` | Shared `ProbeCtx` (the scan-wide config every check reads from `Target.Data`), request-building helpers, and `DiscoveryCheck` |
 | — | `cache/probe.go` | `BuildChecks`/`CheckDefs`/`ScanAll` — wires every check into one `harnessx.Engine.Run` |
+
+`stale-if-error` confirmation (§9) only demonstrates anything against an origin/fixture that honors its simulated-failure probe header (`X-Cache-Detective-Simulate-Error`) — cache-detective has no way to force a real 5xx, timeout, or DNS failure out of an arbitrary origin it doesn't control. Against everything else, the result stays inconclusive rather than a guessed verdict; see the `staleserving` package doc comment and `testdata/fixtureserver`'s `/stale` endpoint for the one case it's exercised against.
 
 IP range (ASN/CIDR) matching from §3 is deliberately **not implemented** in v1 — it needs a maintained, licensable dataset. The `Result` shape it would populate is defined now (`fingerprint.Result.IPRangeLookupAvailable`) so a real backend drops in later without reshaping the check.
 

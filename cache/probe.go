@@ -1,5 +1,5 @@
 // Package cache wires together every check package (cacheability,
-// livestate, fingerprint, varykey, security, consistency) into the
+// livestate, fingerprint, varykey, security, consistency, staleserving) into the
 // registered harnessx.Engine check list: BuildChecks/CheckDefs describe
 // the fixed check registry, and ScanAll drives one harnessx.Engine.Run.
 //
@@ -23,6 +23,7 @@ import (
 	"github.com/cerberauth/cache-detective/cache/checks/fingerprint"
 	"github.com/cerberauth/cache-detective/cache/checks/livestate"
 	"github.com/cerberauth/cache-detective/cache/checks/security"
+	"github.com/cerberauth/cache-detective/cache/checks/staleserving"
 	"github.com/cerberauth/cache-detective/cache/checks/varykey"
 )
 
@@ -46,6 +47,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		fingerprint.Check,
 		varykey.Check,
 		consistency.Check,
+		staleserving.Check,
 		security.UnkeyedHeaderCheck,
 		security.CacheDeceptionCheck,
 		security.ErrorCachingCheck,
@@ -59,6 +61,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDFingerprint:       fingerprint.Def,
 		checkbase.CheckIDVaryKey:           varykey.Def,
 		checkbase.CheckIDConsistency:       consistency.Def,
+		checkbase.CheckIDStaleServing:      staleserving.Def,
 		checkbase.CheckIDUnkeyedHeader:     security.UnkeyedHeaderDef,
 		checkbase.CheckIDCacheDeception:    security.CacheDeceptionDef,
 		checkbase.CheckIDErrorCaching:      security.ErrorCachingDef,

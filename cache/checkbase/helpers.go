@@ -3,15 +3,17 @@ package checkbase
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/cerberauth/harnessx/probe"
 )
 
 // NewRequest builds an HTTP request for targetURL using pctx's configured
-// method, headers, cookies, and bearer token. extra headers (e.g. a
-// check-specific cache-buster or injected header) are applied last, so they
-// win over ProbeCtx defaults.
+// method, headers, cookies, and bearer token — overridden by the
+// AuthProfiles entry matching targetURL's origin, if any. extra headers
+// (e.g. a check-specific cache-buster or injected header) are applied last,
+// so they win over both.
 func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra http.Header) (*http.Request, error) {
 	method := pctx.Method
 	if method == "" {
@@ -21,19 +23,25 @@ func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra htt
 	if err != nil {
 		return nil, err
 	}
-	for k, vs := range pctx.Headers {
+
+	headers, cookies, bearer := pctx.Headers, pctx.Cookies, pctx.BearerToken
+	if profile, ok := pctx.AuthProfiles[requestOrigin(req.URL)]; ok {
+		headers, cookies, bearer = profile.Headers, profile.Cookies, profile.BearerToken
+	}
+
+	for k, vs := range headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
 	}
-	for _, c := range pctx.Cookies {
+	for _, c := range cookies {
 		// Secure/HttpOnly/SameSite are response-cookie attributes; this is
 		// an outgoing request cookie the caller explicitly configured for
 		// probing, so gosec's response-cookie-hardening check doesn't apply.
 		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value}) //nolint:gosec // G124: outgoing probe cookie, not a response cookie
 	}
-	if pctx.BearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+pctx.BearerToken)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	for k, vs := range extra {
 		req.Header.Del(k)
@@ -42,6 +50,12 @@ func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra htt
 		}
 	}
 	return req, nil
+}
+
+// requestOrigin returns u's scheme://host[:port], the key AuthProfiles is
+// looked up by.
+func requestOrigin(u *url.URL) string {
+	return u.Scheme + "://" + u.Host
 }
 
 // Exchange is one probe request/response pair, reduced to what checks need:

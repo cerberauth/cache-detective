@@ -202,6 +202,16 @@ jobs:
             vulnerable: false
             scan_args: "--aggressive --cookie session=cache-detective-scan"
             expect_title: "Authenticated response marked cacheable"
+          - challenge: "cache-sensitive-data-exposure"
+            path: "/dashboard"
+            vulnerable: true
+            scan_args: "--aggressive --auth-profiles auth-profiles.json --max-retries 2 --retry-delay 200ms"
+            expect_title: "Authenticated response marked cacheable"
+          - challenge: "cache-sensitive-data-exposure"
+            path: "/dashboard"
+            vulnerable: false
+            scan_args: "--aggressive --auth-profiles auth-profiles.json --max-retries 2 --retry-delay 200ms"
+            expect_title: "Authenticated response marked cacheable"
 
     steps:
       - uses: actions/checkout@v7
@@ -212,6 +222,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write per-target auth profile
+        # Exercises --auth-profiles: same credential the sibling --cookie
+        # matrix rows pass directly, but resolved per-origin instead.
+        run: |
+          cat > auth-profiles.json <<'EOF'
+          { "http://localhost:8080": { "cookies": { "session": "cache-detective-scan" } } }
+          EOF
 
       - name: Run challenge server
         run: docker run -d -p 8080:8080 ghcr.io/cerberauth/api-vulns-challenges/${{ matrix.challenge }}:latest serve --vulnerable=${{ matrix.vulnerable }}

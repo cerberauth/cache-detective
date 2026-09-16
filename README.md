@@ -182,6 +182,9 @@ cache-detective scan (--url <url> | --list <file> | --sitemap <url> | --har <fil
 | `--header` | Custom request header `Name=Value` (repeatable) |
 | `--cookie` | Cookie `name=value` to send with every request (repeatable) |
 | `--bearer` | Bearer token for authenticated cache testing |
+| `--auth-profiles` | Path to a JSON file mapping target origin (`scheme://host[:port]`) to per-origin headers/cookies/bearer, overriding `--header`/`--cookie`/`--bearer` for matching resources |
+| `--max-retries` | Maximum retry attempts per probe request on transient failures (default `0`, no retries) |
+| `--retry-delay` | Base delay between retry attempts, grows with backoff and honors `Retry-After` (default `500ms`) |
 | `--requests` | Probe requests issued per resource for live cache-state detection (default `3`) |
 | `--interval` | Delay between consecutive probe requests to the same resource (default `500ms`) |
 | `--timeout` | Per-request timeout (default `15s`) |
@@ -214,6 +217,10 @@ cache-detective scan --url https://example.com/ --crawl --path-prefix /blog
 # Authenticated cache testing
 cache-detective scan --url https://example.com/account --bearer $TOKEN
 
+# Per-target auth profiles: different credentials for different hosts in a
+# single list/sitemap/crawl run (see auth-profiles.json below)
+cache-detective scan --list urls.txt --auth-profiles auth-profiles.json
+
 # Cache poisoning / cache deception probing (opt-in, see "Safety defaults" below)
 cache-detective scan --url https://example.com/ --aggressive
 
@@ -224,6 +231,22 @@ cache-detective diff before.json after.json
 ```
 
 Exits `1` when any check fails.
+
+`--auth-profiles` is a JSON file mapping each target's origin to its own credentials, for scans that span multiple hosts:
+
+```json
+{
+  "https://api.example.com": {
+    "bearer": "eyJhbGciOi...",
+    "headers": { "X-Api-Version": ["2"] }
+  },
+  "https://admin.example.com": {
+    "cookies": { "session": "abc123" }
+  }
+}
+```
+
+A resource whose origin has no matching entry falls back to `--header`/`--cookie`/`--bearer`.
 
 ---
 

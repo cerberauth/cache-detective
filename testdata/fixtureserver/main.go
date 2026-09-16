@@ -10,8 +10,11 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"sync"
+	"time"
 )
 
 func main() {
@@ -95,6 +98,81 @@ func main() {
 		_, _ = w.Write([]byte(cachedPoison))
 	})
 
+	// /stale: exercises the stale-while-revalidate / stale-if-error check
+	// (§9). In fixed mode it behaves like a real edge cache: it serves the
+	// last-known-good body promptly once the response enters its
+	// stale-while-revalidate window (instead of blocking on a synchronous
+	// origin refetch), and keeps serving that body — instead of a 5xx —
+	// when the caller signals a simulated origin failure via
+	// X-Cache-Detective-Simulate-Error, as long as the request is still
+	// within stale-if-error's window. In vulnerable mode neither directive
+	// is actually honored: every request past max-age blocks on a
+	// synchronous refetch, and a simulated origin failure always surfaces
+	// as a 500 regardless of stale-if-error.
+	edge := &staleEdgeCache{
+		maxAge: time.Second,
+		swr:    3 * time.Second,
+		sie:    5 * time.Second,
+		honor:  !*vulnerable,
+	}
+	mux.HandleFunc("/stale", edge.handler)
+
 	log.Printf("fixtureserver listening on %s (vulnerable=%v)", *addr, *vulnerable)
 	log.Fatal(http.ListenAndServe(*addr, mux)) //nolint:gosec // G114: fixed-duration CI fixture, not a production server
+}
+
+// staleEdgeCache is a minimal in-memory stand-in for a fronting CDN's
+// freshness/stale-serving logic, used by /stale to give the stale-serving
+// check (§9) something real to observe over the wire.
+type staleEdgeCache struct {
+	mu        sync.Mutex
+	fetchedAt time.Time
+	body      string
+	honor     bool
+	maxAge    time.Duration
+	swr       time.Duration
+	sie       time.Duration
+}
+
+func (c *staleEdgeCache) handler(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	if c.fetchedAt.IsZero() {
+		c.fetchedAt = now
+		c.body = "stale-serving fixture content"
+	}
+	age := now.Sub(c.fetchedAt)
+
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d, stale-if-error=%d", int(c.maxAge.Seconds()), int(c.swr.Seconds()), int(c.sie.Seconds())))
+
+	if r.Header.Get("X-Cache-Detective-Simulate-Error") != "" {
+		if c.honor && age < c.maxAge+c.swr+c.sie {
+			w.Header().Set("Age", fmt.Sprintf("%d", int(age.Seconds())))
+			_, _ = w.Write([]byte(c.body))
+			return
+		}
+		http.Error(w, "simulated origin failure", http.StatusInternalServerError)
+		return
+	}
+
+	switch {
+	case age < c.maxAge:
+		w.Header().Set("Age", fmt.Sprintf("%d", int(age.Seconds())))
+		_, _ = w.Write([]byte(c.body))
+	case age < c.maxAge+c.swr && c.honor:
+		w.Header().Set("Age", fmt.Sprintf("%d", int(age.Seconds())))
+		_, _ = w.Write([]byte(c.body))
+		c.fetchedAt = now // background revalidation, completed instantly
+	case age < c.maxAge+c.swr && !c.honor:
+		time.Sleep(300 * time.Millisecond) // blocks on a synchronous refetch
+		c.fetchedAt = now
+		w.Header().Set("Age", "0")
+		_, _ = w.Write([]byte(c.body))
+	default:
+		c.fetchedAt = now
+		w.Header().Set("Age", "0")
+		_, _ = w.Write([]byte(c.body))
+	}
 }

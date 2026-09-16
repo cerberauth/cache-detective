@@ -124,6 +124,29 @@ jobs:
             echo "No finding for the fixed /poison fixture, as expected"
           fi
 
+      - name: Scan /stale for stale-while-revalidate/stale-if-error behavior (aggressive)
+        run: |
+          ./cache-detective scan --url http://localhost:8080/stale --requests 1 --aggressive --stale-window-max-wait 10s --sqa-opt-out \
+            --output-format json --output stale-report.json --quiet
+
+      - name: Check stale-serving result matches expected vulnerability state
+        run: |
+          count=$(jq '[.findings[] | select(.title == "stale-while-revalidate not honored" or .title == "stale-if-error not honored")] | length' stale-report.json)
+          if [ "${{ matrix.vulnerable }}" = "true" ]; then
+            if [ "$count" -eq 0 ]; then
+              echo "::error::No stale-serving finding for the vulnerable /stale fixture"
+              exit 1
+            fi
+            echo "Found $count finding(s) for the vulnerable /stale fixture, as expected"
+          else
+            if [ "$count" -gt 0 ]; then
+              echo "::error::Unexpected stale-serving finding for the fixed /stale fixture"
+              jq '.findings[] | .title' stale-report.json
+              exit 1
+            fi
+            echo "No finding for the fixed /stale fixture, as expected"
+          fi
+
   run-scan-challenges:
     name: Scan challenge - ${{ matrix.challenge }} (${{ matrix.vulnerable && 'vulnerable' || 'not vulnerable' }})
     runs-on: ubuntu-latest

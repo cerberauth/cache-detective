@@ -37,6 +37,7 @@ var (
 	scanRequestCount    int
 	scanRequestInterval time.Duration
 	scanTimeout         time.Duration
+	scanStaleWindowWait time.Duration
 	scanAggressive      bool
 	scanMaxAggressive   int
 	scanMaxConcurrency  int
@@ -85,6 +86,7 @@ Use only against systems you own or have explicit written permission to test.`,
 			RequestCount:          scanRequestCount,
 			RequestInterval:       scanRequestInterval,
 			Timeout:               scanTimeout,
+			StaleWindowMaxWait:    scanStaleWindowWait,
 			Aggressive:            scanAggressive,
 			MaxAggressiveRequests: scanMaxAggressive,
 			Resources:             resources,
@@ -229,6 +231,7 @@ func init() {
 	scanCmd.Flags().IntVar(&scanRequestCount, "requests", 3, "Probe requests issued per resource for live cache-state detection")
 	scanCmd.Flags().DurationVar(&scanRequestInterval, "interval", 500*time.Millisecond, "Delay between consecutive probe requests to the same resource")
 	scanCmd.Flags().DurationVar(&scanTimeout, "timeout", 15*time.Second, "Per-request timeout")
+	scanCmd.Flags().DurationVar(&scanStaleWindowWait, "stale-window-max-wait", 30*time.Second, "Maximum time to wait for a resource to enter its declared stale-while-revalidate window before giving up on actively confirming it")
 	scanCmd.Flags().BoolVar(&scanAggressive, "aggressive", false, "Enable cache poisoning/deception probing (§5) — opt-in since it intentionally probes for exploitable cache behavior")
 	scanCmd.Flags().IntVar(&scanMaxAggressive, "max-aggressive-requests", 10, "Hard cap on extra probe requests per resource for --aggressive checks (and the read-only vary-key check)")
 	scanCmd.Flags().IntVar(&scanMaxConcurrency, "max-concurrency", 0, "Maximum concurrent checks (default: number of CPUs)")

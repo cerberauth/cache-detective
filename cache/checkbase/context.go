@@ -82,6 +82,21 @@ type ProbeCtx struct {
 	// resource whose freshness lifetime exceeds this budget still gets its
 	// directives reported, just not behaviorally confirmed.
 	StaleWindowMaxWait time.Duration
+
+	// AuthProfiles overrides Headers/Cookies/BearerToken per target origin
+	// (scheme://host[:port]), so a single batch/crawl/list run can carry
+	// different credentials for different hosts instead of one set of
+	// credentials applied to every resource. A resource whose origin has no
+	// matching entry falls back to the top-level Headers/Cookies/BearerToken.
+	AuthProfiles map[string]AuthProfile
+}
+
+// AuthProfile is a set of credentials (headers, cookies, bearer token)
+// scoped to one target origin, keyed into ProbeCtx.AuthProfiles.
+type AuthProfile struct {
+	Headers     map[string][]string
+	Cookies     []Cookie
+	BearerToken string
 }
 
 // SeverityKey is the Observation.Metadata key every check uses to attach an

@@ -34,6 +34,9 @@ var (
 	scanHeaders         []string
 	scanCookies         []string
 	scanBearer          string
+	scanAuthProfiles    string
+	scanMaxRetries      int
+	scanRetryDelay      time.Duration
 	scanRequestCount    int
 	scanRequestInterval time.Duration
 	scanTimeout         time.Duration
@@ -77,12 +80,21 @@ Use only against systems you own or have explicit written permission to test.`,
 			return fmt.Errorf("no resources to scan")
 		}
 
+		var authProfiles map[string]checkbase.AuthProfile
+		if scanAuthProfiles != "" {
+			authProfiles, err = checkbase.LoadAuthProfiles(scanAuthProfiles)
+			if err != nil {
+				return err
+			}
+		}
+
 		pctx := checkbase.ProbeCtx{
-			Probe:                 probe.New(),
+			Probe:                 probe.New(probe.WithMaxRetries(scanMaxRetries), probe.WithRetryDelay(scanRetryDelay), probe.WithTimeout(scanTimeout)),
 			Method:                scanMethod,
 			Headers:               parseHeaders(scanHeaders),
 			Cookies:               parseCookies(scanCookies),
 			BearerToken:           scanBearer,
+			AuthProfiles:          authProfiles,
 			RequestCount:          scanRequestCount,
 			RequestInterval:       scanRequestInterval,
 			Timeout:               scanTimeout,
@@ -228,6 +240,9 @@ func init() {
 	scanCmd.Flags().StringArrayVar(&scanHeaders, "header", nil, "Custom request header \"Name=Value\" (repeatable)")
 	scanCmd.Flags().StringArrayVar(&scanCookies, "cookie", nil, "Cookie \"name=value\" to send with every request (repeatable)")
 	scanCmd.Flags().StringVar(&scanBearer, "bearer", "", "Bearer token for authenticated cache testing")
+	scanCmd.Flags().StringVar(&scanAuthProfiles, "auth-profiles", "", "Path to a JSON file mapping target origin (scheme://host[:port]) to per-origin headers/cookies/bearer, overriding --header/--cookie/--bearer for matching resources")
+	scanCmd.Flags().IntVar(&scanMaxRetries, "max-retries", 0, "Maximum retry attempts per probe request on transient failures (0 = no retries)")
+	scanCmd.Flags().DurationVar(&scanRetryDelay, "retry-delay", 500*time.Millisecond, "Base delay between retry attempts (grows with backoff, honors Retry-After)")
 	scanCmd.Flags().IntVar(&scanRequestCount, "requests", 3, "Probe requests issued per resource for live cache-state detection")
 	scanCmd.Flags().DurationVar(&scanRequestInterval, "interval", 500*time.Millisecond, "Delay between consecutive probe requests to the same resource")
 	scanCmd.Flags().DurationVar(&scanTimeout, "timeout", 15*time.Second, "Per-request timeout")

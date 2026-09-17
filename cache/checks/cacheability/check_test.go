@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/cerberauth/cache-detective/cache/checkbase"
@@ -73,6 +74,30 @@ func TestCheck_AuthenticatedCacheableFlagsFinding(t *testing.T) {
 	assert.Equal(t, checkbase.SeverityHigh, res.Observations[0].Metadata[checkbase.SeverityKey])
 }
 
+func TestCheck_AuthProfileOnlyCacheableFlagsFinding(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=600")
+		w.Header().Set("ETag", `"v1"`)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// No top-level BearerToken/Cookies, so WithDefaults leaves Authenticated
+	// false — credentials come only from a per-origin AuthProfiles entry.
+	pctx := (&checkbase.ProbeCtx{
+		Probe: probe.New(),
+		AuthProfiles: map[string]checkbase.AuthProfile{
+			serverOrigin(t, srv.URL): {Cookies: []checkbase.Cookie{{Name: "session", Value: "abc"}}},
+		},
+	}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
+	require.True(t, ok)
+	require.Len(t, res.Observations, 1)
+	assert.Equal(t, "Authenticated response marked cacheable", res.Observations[0].Title)
+}
+
 func TestCheck_AuthenticatedCacheableWithSensitiveBodyEscalatesSeverity(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=600")
@@ -122,6 +147,13 @@ func TestCheck_AuthenticatedPrivateNotFlagged(t *testing.T) {
 	res, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
 	require.True(t, ok)
 	assert.Empty(t, res.Observations)
+}
+
+func serverOrigin(t *testing.T, rawURL string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	require.NoError(t, err)
+	return u.Scheme + "://" + u.Host
 }
 
 func findResult(summary harnessx.ScanSummary, id harnessx.CheckID, resourceID string) (harnessx.Result, bool) {

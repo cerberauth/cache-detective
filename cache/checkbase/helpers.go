@@ -58,6 +58,23 @@ func requestOrigin(u *url.URL) string {
 	return u.Scheme + "://" + u.Host
 }
 
+// IsAuthenticated reports whether the request built by NewRequest for
+// targetURL carries credentials: either pctx.Authenticated (the global flag,
+// forced or derived from top-level BearerToken/Cookies) or a per-origin
+// AuthProfiles entry with its own bearer token or cookies, if targetURL's
+// origin has one.
+func IsAuthenticated(targetURL string, pctx *ProbeCtx) bool {
+	if pctx.Authenticated {
+		return true
+	}
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return false
+	}
+	profile, ok := pctx.AuthProfiles[requestOrigin(u)]
+	return ok && (profile.BearerToken != "" || len(profile.Cookies) > 0)
+}
+
 // Exchange is one probe request/response pair, reduced to what checks need:
 // status, headers, timing, and (when read) body. It's the cache-detective
 // counterpart of harnessx.Snapshot, kept local so checks can attach

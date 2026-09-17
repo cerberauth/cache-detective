@@ -25,12 +25,39 @@ Identifies the CDN/reverse proxy in front of a resource and flags evidence of mu
 | Vercel | `vercel` | `vercel-dns.com`, `vercel.app` |
 | Netlify | `netlify` | `netlify.app`, `netlifyglobalcdn.com` |
 | Pantheon | `pantheon` | `pantheonsite.io` |
+| Google Cloud CDN | `1.1 google` (Via) | — |
+| Azure Front Door | — (`X-Cache-Info` on multi-tier hits) | `azurefd.net` |
+| Nginx (`proxy_cache`) | — (fingerprinted via `X-Cache-Status` presence, see below) | — |
+| KeyCDN | `keycdn-engine` | `kxcdn.com` |
+| Bunny CDN | `bunnycdn` | `b-cdn.net` |
 
 The full signature table, including each entry's cache-status header, lives in [`cache/cdn/registry.go`](https://github.com/cerberauth/cache-detective/blob/main/cache/cdn/registry.go).
 
 A `Server`/`Via`/CNAME that doesn't match any of the above isn't a dead end: the [live cache state](../live-cache-state/) check still falls back to generic header conventions and a timing/Age heuristic (see that page for the fallback chain) — this check just reports no CDN name in that case.
 
-**Missing your CDN or server?** [Open an issue](https://github.com/cerberauth/cache-detective/issues/new) with the `Server`/`Via`/cache-status headers and CNAME chain it emits. Adding an entry to the registry is a data change, not a code change, so most requests are a small PR.
+Nginx's `proxy_cache` is intentionally not fingerprinted via its `Server` header: `nginx` alone identifies countless plain origins that aren't caching anything (`proxy_cache` is opt-in config, not a default), so matching on it would misidentify most nginx-fronted sites as a cache. Its entry has no `ServerMatch`/`ViaMatch` at all — it's only recognized when the (also opt-in) `X-Cache-Status` header is actually present, via the same generic per-registry-entry fallback that recognizes any CDN's cache-status header when Server/Via fingerprinting comes up empty.
+
+## The CDN quirk database
+
+Each [`cache/cdn/registry.go`](https://github.com/cerberauth/cache-detective/blob/main/cache/cdn/registry.go) entry is a living data record of one CDN's cache-observability quirks, not just its cache-status header:
+
+- **`StaticExtensions`** — file extensions the CDN is publicly documented to cache by default, even with no explicit `Cache-Control` from the origin (the "static-extension" cache-deception surface the [cache deception check](../cache-poisoning-and-deception/) probes generically). Populated for Cloudflare from its [default cache behavior docs](https://developers.cloudflare.com/cache/concepts/default-cache-behavior/); left empty where a CDN's default is config-driven (e.g. Fastly's VCL) or undocumented.
+- **`CacheKeyNormalizesBeforeCacheRules`** / **`CacheKeyNotes`** — whether the CDN is known to normalize the request into a cache key (query-string reordering, Host case-folding, delimiter collapsing, ...) *before* evaluating the origin's `Cache-Control`, versus evaluating the raw request first.
+- **`KnownIssues`** — publicly disclosed CVEs/quirks affecting the CDN's caching behavior, cited for a reader's context when investigating a finding — this package doesn't fingerprint vulnerable software versions or detect these itself. For example: [CPDoS (2019)](https://cpdos.org/), a cross-CDN cache-poisoned-DoS technique affecting Cloudflare, Fastly, Akamai, CloudFront, Varnish, and Azure; Cloudflare's pre-2021-08-03 default caching of `403` responses; and the 2026 Cloudflare Pingora vulnerabilities (CVE-2026-2833/2835/2836).
+
+None of these fields are expected to be complete for every entry — this is deliberately living data, filled in incrementally as quirks are documented or disclosed, rather than a one-time exhaustive dataset.
+
+### Adding or extending a CDN entry
+
+Adding a new CDN, or filling in a quirk field for an existing one, is a data change to `cache/cdn/registry.go`, not a code change — append a `Signature` (or edit an existing one) and open a PR. To add a new entry:
+
+1. Capture real response headers from the CDN (`curl -sI` against a site fronted by it) — the `Server`/`Via` header, its cache-status header and HIT/MISS/etc vocabulary, and the `Age` header if present.
+2. Resolve the CNAME chain of a hostname fronted by it (`dig CNAME <host>`) for `ApexDomains`, if it's reachable via CNAME rather than a fixed anycast IP.
+3. Only set `ServerMatch`/`ViaMatch` to a string that's specific to the CDN's own edge software — not a generic origin-server value (e.g. a bare `nginx` or `apache`) that would misidentify plain, non-caching origins. When no such fingerprint exists, omit `ServerMatch`/`ViaMatch` entirely and rely on the cache-status header's own presence, as done for `Nginx (proxy_cache)`.
+4. Cite a source (a doc link or comment) for anything you add, especially `StaticExtensions` and `KnownIssues` — these are read by people investigating real findings, so they need to be verifiable.
+5. Add a `cdn_test.go` case exercising `Detect`/`MatchCNAME` against synthetic headers matching what you captured.
+
+**Missing your CDN or server, or know of a quirk/CVE worth citing?** [Open an issue](https://github.com/cerberauth/cache-detective/issues/new) with what you've observed, or send the PR directly.
 
 ## What's not implemented (yet)
 

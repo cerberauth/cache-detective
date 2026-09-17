@@ -34,7 +34,28 @@ const (
 	genericXCacheHeader = "X-Cache"
 	hitValue            = "hit"
 	missValue           = "miss"
+	expiredValue        = "expired"
+	staleValue          = "stale"
+	bypassValue         = "bypass"
+	revalidatedValue    = "revalidated"
+	updatingValue       = "updating"
+
+	// cpdosReference is cited by every KnownIssue documenting a CPDoS-2019
+	// finding.
+	cpdosReference = "https://cpdos.org/"
 )
+
+// cpdosIssue is cited by every CDN/reverse-proxy the original CPDoS research
+// (Nguyen, Lo Iacono, Federrath — "Your Cache Has Fallen", ACM CCS 2019)
+// confirmed was susceptible to at least one of its three cache-poisoned
+// denial-of-service variants: an oversized header (HHO), an HTTP
+// meta-character (HMC), or an X-HTTP-Method-Override value (HMO) that
+// provokes a cacheable 4xx from the origin.
+var cpdosIssue = KnownIssue{
+	ID:          "CPDoS-2019",
+	Description: "An oversized header, an HTTP meta-character, or an X-HTTP-Method-Override value can provoke a 4xx from the origin that gets cached and served to every subsequent visitor of that URL.",
+	Reference:   cpdosReference,
+}
 
 // Signature describes one CDN/reverse-proxy's cache-observability
 // conventions: which header carries its cache-status verdict, how that
@@ -69,6 +90,44 @@ type Signature struct {
 	// request traversed more than one cache tier (edge + shield/regional),
 	// e.g. Fastly's "X-Served-By" carrying multiple POP identifiers.
 	MultiTierHeaders []string
+
+	// StaticExtensions lists file extensions this CDN is publicly documented
+	// to cache by default (subject to the CDN's own standard exclusions,
+	// e.g. Set-Cookie/no-store/private) even when the origin sends no
+	// explicit Cache-Control — the same "static-extension" surface the
+	// cache-deception check (§5) probes generically. Nil when the CDN's
+	// default behavior is entirely config-driven (e.g. Fastly's VCL) or not
+	// publicly documented — living data, expected to grow via PRs rather
+	// than be complete from the start.
+	StaticExtensions []string
+
+	// CacheKeyNormalizesBeforeCacheRules documents, when true, that this CDN
+	// is known to normalize the request into a cache key (query-string
+	// reordering/stripping, Host case-folding, delimiter collapsing, etc.)
+	// before evaluating the origin's Cache-Control — so two requests that
+	// collapse to the same key can share one cacheability decision even if
+	// only one of them actually matched the origin's directives. Left false
+	// (the zero value) when the CDN evaluates Cache-Control against the raw
+	// request first, or the ordering isn't publicly documented.
+	CacheKeyNormalizesBeforeCacheRules bool
+	// CacheKeyNotes elaborates on CacheKeyNormalizesBeforeCacheRules with
+	// specifics when documented; empty otherwise.
+	CacheKeyNotes string
+
+	// KnownIssues cites publicly disclosed CVEs/quirks affecting this CDN's
+	// caching behavior, for a reader investigating a finding against it —
+	// context, not something this package fingerprints or detects itself.
+	KnownIssues []KnownIssue
+}
+
+// KnownIssue documents one publicly disclosed CDN-specific caching quirk or
+// CVE.
+type KnownIssue struct {
+	// ID is a CVE identifier (e.g. "CVE-2026-2836") when one was assigned,
+	// or a short slug for a disclosed quirk that never got one.
+	ID          string
+	Description string
+	Reference   string
 }
 
 // Registry is the extensible table of known CDN/reverse-proxy signatures.
@@ -79,18 +138,46 @@ var Registry = []Signature{
 		Name:              "Cloudflare",
 		CacheStatusHeader: "CF-Cache-Status",
 		StatusValues: map[string]State{
-			hitValue:      StateHit,
-			missValue:     StateMiss,
-			"expired":     StateExpired,
-			"stale":       StateStale,
-			"bypass":      StateBypass,
-			"dynamic":     StateDynamic,
-			"revalidated": StateHit,
-			"updating":    StateStale,
+			hitValue:         StateHit,
+			missValue:        StateMiss,
+			expiredValue:     StateExpired,
+			staleValue:       StateStale,
+			bypassValue:      StateBypass,
+			"dynamic":        StateDynamic,
+			revalidatedValue: StateHit,
+			updatingValue:    StateStale,
 		},
 		AgeHeader:   ageHeader,
 		ServerMatch: []string{"cloudflare"},
 		ApexDomains: []string{"cloudflare.net"},
+		// Source: https://developers.cloudflare.com/cache/concepts/default-cache-behavior/
+		StaticExtensions: []string{
+			"7z", "apk", "avi", "avif", "bin", "bmp", "bz2", "class", "css", "csv", "dmg", "doc",
+			"docx", "ejs", "eot", "eps", "exe", "flac", "gif", "gz", "ico", "iso", "jar", "jpg",
+			"jpeg", "js", "mid", "midi", "mkv", "mp3", "mp4", "ogg", "otf", "pdf", "pict", "pls",
+			"png", "ppt", "pptx", "ps", "rar", "svg", "svgz", "swf", "tar", "tif", "tiff", "ttf",
+			"webm", "webp", "woff", "woff2", "xls", "xlsx", "zip", "zst",
+		},
+		CacheKeyNormalizesBeforeCacheRules: true,
+		CacheKeyNotes:                      "The Host header is lowercased for the cache key before lookup, but forwarded to the origin verbatim — a capitalized-Host cache-poisoning variant was disclosed and fixed in 2020/2021 (see KnownIssues).",
+		KnownIssues: []KnownIssue{
+			{
+				ID:          "cloudflare-403-caching-pre-2021-08-03",
+				Description: "Before 2021-08-03, Cloudflare cached 403 responses by default even with no Cache-Control from the origin, letting an attacker force a cacheable 403 (e.g. via a bad Authorization header against an S3/Blob-backed origin) to overwrite a shared object for every subsequent visitor.",
+				Reference:   "https://youst.in/posts/cache-poisoning-at-scale/",
+			},
+			{
+				ID:          "CVE-2025-4366",
+				Description: "HTTP/1.1 request smuggling in Cloudflare's Pingora proxy layer let a cache-hit response be served without fully draining the incoming request body, enabling cache poisoning on cache hits.",
+				Reference:   "https://blog.cloudflare.com/pingora-oss-smuggling-vulnerabilities/",
+			},
+			{
+				ID:          "CVE-2026-2836",
+				Description: "Pingora's default HTTP cache key construction used only the URI path, excluding the Host/authority — a cross-tenant cache-poisoning surface in multi-tenant Pingora deployments (Cloudflare's own CDN uses a broader key and wasn't affected).",
+				Reference:   "https://blog.cloudflare.com/pingora-oss-smuggling-vulnerabilities/",
+			},
+			cpdosIssue,
+		},
 	},
 	{
 		Name:              "Fastly",
@@ -105,6 +192,7 @@ var Registry = []Signature{
 		ViaMatch:         []string{"varnish"},
 		ApexDomains:      []string{"fastly.net", "fastlylb.net"},
 		MultiTierHeaders: []string{"X-Served-By", "X-Cache-Hits"},
+		KnownIssues:      []KnownIssue{cpdosIssue},
 	},
 	{
 		Name:              "Akamai",
@@ -119,6 +207,7 @@ var Registry = []Signature{
 		AgeHeader:   ageHeader,
 		ServerMatch: []string{"akamaighost"},
 		ApexDomains: []string{"akamaiedge.net", "akamaitechnologies.com", "akamai.net"},
+		KnownIssues: []KnownIssue{cpdosIssue},
 	},
 	{
 		Name:              "Amazon CloudFront",
@@ -134,6 +223,13 @@ var Registry = []Signature{
 		AgeHeader:   ageHeader,
 		ViaMatch:    []string{"cloudfront"},
 		ApexDomains: []string{"cloudfront.net"},
+		KnownIssues: []KnownIssue{
+			{
+				ID:          "cpdos-cloudfront-400-default-cache",
+				Description: "The most severely affected CDN in the original 2019 CPDoS study: CloudFront cached 400 Bad Request responses by default with no explicit Cache-Control from the origin, across all three CPDoS variants. AWS fixed this by no longer caching 400s by default.",
+				Reference:   cpdosReference,
+			},
+		},
 	},
 	{
 		Name:              "Varnish",
@@ -145,6 +241,7 @@ var Registry = []Signature{
 		AgeHeader:        ageHeader,
 		ViaMatch:         []string{"varnish"},
 		MultiTierHeaders: []string{"X-Varnish"},
+		KnownIssues:      []KnownIssue{cpdosIssue},
 	},
 	{
 		Name:              "Vercel",
@@ -152,8 +249,8 @@ var Registry = []Signature{
 		StatusValues: map[string]State{
 			hitValue:    StateHit,
 			missValue:   StateMiss,
-			"stale":     StateStale,
-			"bypass":    StateBypass,
+			staleValue:  StateStale,
+			bypassValue: StateBypass,
 			"prerender": StateHit,
 		},
 		AgeHeader:   ageHeader,
@@ -178,6 +275,94 @@ var Registry = []Signature{
 		AgeHeader:   ageHeader,
 		ServerMatch: []string{"pantheon"},
 		ApexDomains: []string{"pantheonsite.io"},
+	},
+	{
+		// Cloud CDN doesn't emit a HIT/MISS header by default — that requires
+		// the operator to opt in to a custom response header bound to the
+		// {cdn_cache_status} URL-map variable, whose name isn't fixed, so
+		// there's no universal CacheStatusHeader to register. Fingerprinting
+		// instead relies on the "Via: 1.1 google" header Google's edge
+		// network adds to every proxied response.
+		// Source: https://docs.cloud.google.com/cdn/docs/caching
+		Name:        "Google Cloud CDN",
+		AgeHeader:   ageHeader,
+		ViaMatch:    []string{"1.1 google"},
+		KnownIssues: []KnownIssue{cpdosIssue},
+	},
+	{
+		Name:              "Azure Front Door",
+		CacheStatusHeader: genericXCacheHeader,
+		StatusValues: map[string]State{
+			"tcp_hit":         StateHit,
+			"tcp_remote_hit":  StateHit,
+			"tcp_miss":        StateMiss,
+			"revalidated_hit": StateHit,
+			"private_nostore": StateBypass,
+			"config_nocache":  StateBypass,
+		},
+		AgeHeader:   ageHeader,
+		ApexDomains: []string{"azurefd.net"},
+		// X-Cache-Info carries an L1/L2 tier code (e.g. "L1_T2") on a cache
+		// hit served from a regional tier behind the edge.
+		// Source: https://learn.microsoft.com/en-us/azure/frontdoor/front-door-caching
+		MultiTierHeaders: []string{"X-Cache-Info"},
+		KnownIssues: []KnownIssue{
+			{
+				ID:          "CVE-2019-0941",
+				Description: "The CVE Microsoft assigned to its fix for the CPDoS (2019) cache-poisoned-DoS variants affecting Azure's edge caching.",
+				Reference:   cpdosReference,
+			},
+			cpdosIssue,
+		},
+	},
+	{
+		// ServerMatch is deliberately omitted: "nginx" alone is the Server
+		// header of countless plain origins that aren't acting as a caching
+		// reverse proxy (proxy_cache is opt-in config, not a default), so
+		// matching on it would misidentify most nginx-fronted sites as a
+		// cache. X-Cache-Status is itself opt-in (an operator must
+		// `add_header X-Cache-Status $upstream_cache_status;`), so its mere
+		// presence is already a reliable, low-false-positive signal — it's
+		// picked up by Detect's generic per-registry-entry header fallback
+		// without needing a Server/Via fingerprint first.
+		Name:              "Nginx (proxy_cache)",
+		CacheStatusHeader: "X-Cache-Status",
+		StatusValues: map[string]State{
+			hitValue:         StateHit,
+			missValue:        StateMiss,
+			bypassValue:      StateBypass,
+			expiredValue:     StateExpired,
+			staleValue:       StateStale,
+			updatingValue:    StateStale,
+			revalidatedValue: StateHit,
+		},
+		AgeHeader: ageHeader,
+	},
+	{
+		Name:              "KeyCDN",
+		CacheStatusHeader: genericXCacheHeader,
+		StatusValues: map[string]State{
+			hitValue:         StateHit,
+			missValue:        StateMiss,
+			expiredValue:     StateExpired,
+			revalidatedValue: StateHit,
+			updatingValue:    StateStale,
+			staleValue:       StateStale,
+		},
+		AgeHeader:   ageHeader,
+		ServerMatch: []string{"keycdn-engine"},
+		ApexDomains: []string{"kxcdn.com"},
+	},
+	{
+		Name:              "Bunny CDN",
+		CacheStatusHeader: "CDN-Cache",
+		StatusValues: map[string]State{
+			hitValue:  StateHit,
+			missValue: StateMiss,
+		},
+		AgeHeader:   ageHeader,
+		ServerMatch: []string{"bunnycdn"},
+		ApexDomains: []string{"b-cdn.net"},
 	},
 }
 

@@ -61,8 +61,15 @@ Live cache-state detection ([§2](#architecture)) and CDN fingerprinting ([§3](
 | Vercel | `X-Vercel-Cache` | `vercel` | `vercel-dns.com`, `vercel.app` |
 | Netlify | `X-Nf-Request-Id` (presence only — Netlify emits no HIT/MISS verdict, see fallback below) | `netlify` | `netlify.app`, `netlifyglobalcdn.com` |
 | Pantheon | `X-Cache` | `pantheon` | `pantheonsite.io` |
+| Google Cloud CDN | — (no default HIT/MISS header, see registry) | `1.1 google` (Via) | — |
+| Azure Front Door | `X-Cache` | — | `azurefd.net` |
+| Nginx (`proxy_cache`) | `X-Cache-Status` (presence only, opt-in — see registry) | — | — |
+| KeyCDN | `X-Cache` | `keycdn-engine` | `kxcdn.com` |
+| Bunny CDN | `CDN-Cache` | `bunnycdn` | `b-cdn.net` |
 
 Several entries share `X-Cache` with different value vocabularies (e.g. Fastly's `hit`/`miss`/`pass` vs. Akamai's `TCP_HIT`/`TCP_MISS`/...) — `Detect` disambiguates by fingerprinting the CDN from `Server`/`Via` (or CNAME) *first*, then reads that CDN's own header, rather than guessing from the header value alone.
+
+Each registry entry is also a living record of CDN-specific caching quirks beyond its header vocabulary: `StaticExtensions` (file extensions cached by default regardless of origin `Cache-Control`), `CacheKeyNormalizesBeforeCacheRules`/`CacheKeyNotes` (when the CDN normalizes the cache key before vs. after evaluating `Cache-Control`), and `KnownIssues` (disclosed CVEs/quirks, e.g. [CPDoS](https://cpdos.org/), cited for context). See [the CDN fingerprinting docs](./docs/reference/checks/cdn-fingerprinting.mdx#the-cdn-quirk-database) for the full schema and how to contribute an entry.
 
 ### Fallback for everything else
 
@@ -287,7 +294,7 @@ Each numbered section below is one `harnessx.Check` (or a small family of them),
 | 7 | `cache/crawl` | URL list / sitemap / `.har` import / same-origin crawl with scope + `robots.txt` courtesy, resolved **before** the engine runs |
 | 8 | `cache/geo` | `Provider` interface + `NoopProvider` for future multi-region probing — no real geo backend ships in v1 |
 | 9 | `cache/checks/staleserving` | Confirms declared `stale-while-revalidate`/`stale-if-error` (RFC 5861) are actually honored by the fronting cache — `stale-if-error` confirmation is `--aggressive`-gated, since it means simulating an origin failure |
-| — | `cache/cdn` | The extensible CDN signature table (Cloudflare, Fastly, Akamai, CloudFront, Varnish, Vercel, Netlify, Pantheon, ...) every detection/fingerprint check reads from |
+| — | `cache/cdn` | The extensible CDN signature table (Cloudflare, Fastly, Akamai, CloudFront, Varnish, Vercel, Netlify, Pantheon, Google Cloud CDN, Azure Front Door, Nginx, KeyCDN, Bunny CDN, ...) every detection/fingerprint check reads from |
 | — | `cache/checkbase` | Shared `ProbeCtx` (the scan-wide config every check reads from `Target.Data`), request-building helpers, and `DiscoveryCheck` |
 | — | `cache/probe.go` | `BuildChecks`/`CheckDefs`/`ScanAll` — wires every check into one `harnessx.Engine.Run` |
 

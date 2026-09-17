@@ -69,7 +69,7 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 		return harnessx.Result{}, err
 	}
 
-	analysis := Analyze(ex.Method, ex.StatusCode, ex.Header, pctx.Authenticated)
+	analysis := Analyze(ex.Method, ex.StatusCode, ex.Header, checkbase.IsAuthenticated(resource.URL, pctx))
 	analysis.Body = ex.Body
 	analysis.SetCookie = ex.Header.Values("Set-Cookie")
 	obs := analysis.Findings

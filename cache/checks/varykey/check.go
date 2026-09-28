@@ -32,16 +32,16 @@ var Def = checkbase.CheckDef{
 	Name:        "Cache Key & Vary Analysis",
 	Description: "Probes what varies the cache key: declared Vary headers, and whether Accept-Encoding/Accept-Language/User-Agent/Cookie/a custom header are actually keyed.",
 	Tags:        []string{"vary", "cache-key"},
-	// DependsOn ResponseSplittingCheck (the tail of the §5 ordering chain —
-	// see security.ResponseSplittingDef), not just Discovery: this check
-	// issues its own plain baseline request, and harnessx runs same-level
-	// checks concurrently. Against a target with a single-slot cache, that
-	// plain GET can win the race and permanently fill the slot with a
-	// clean response before a poisoning check gets a chance to plant its
-	// own — masking a real finding.
+	// DependsOn CPDoSCheck (the tail of the §5 ordering chain — see
+	// security.CPDoSDef), not just Discovery: this check issues its own
+	// plain baseline request, and harnessx runs same-level checks
+	// concurrently. Against a target with a single-slot cache, that plain
+	// GET can win the race and permanently fill the slot with a clean
+	// response before a poisoning check gets a chance to plant its own —
+	// masking a real finding.
 	DependsOn: []string{
 		string(checkbase.CheckIDDiscovery),
-		string(checkbase.CheckIDResponseSplitting),
+		string(checkbase.CheckIDCPDoS),
 	},
 }
 

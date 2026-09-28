@@ -24,6 +24,7 @@ var securityChain = []harnessx.Check{
 	security.CacheDeceptionCheck,
 	security.ErrorCachingCheck,
 	security.ResponseSplittingCheck,
+	security.CPDoSCheck,
 }
 
 func TestCheck_UndeclaredUserAgentKeying(t *testing.T) {

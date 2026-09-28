@@ -15,7 +15,7 @@ import { Aside } from '@/components/docs';
 cache-detective scan --url https://staging.example.com/ --aggressive
 ```
 
-This enables the four checks documented in [Cache poisoning & deception](../reference/checks/cache-poisoning-and-deception/): unkeyed header injection, cache deception, error-response caching, and response splitting via cache-key manipulation. Every other check (cacheability, live cache state, CDN fingerprinting, cache key & Vary, response consistency) runs regardless of `--aggressive`.
+This enables the five checks documented in [Cache poisoning & deception](../reference/checks/cache-poisoning-and-deception/): unkeyed header injection, cache deception, error-response caching, response splitting via cache-key manipulation, and Cache-Poisoned Denial of Service (CPDoS). Every other check (cacheability, live cache state, CDN fingerprinting, cache key & Vary, response consistency) runs regardless of `--aggressive`.
 
 ## Cap the request volume
 

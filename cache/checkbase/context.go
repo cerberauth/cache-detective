@@ -182,6 +182,9 @@ const (
 	// CheckIDResponseSplitting is the §5 response-splitting-via-cache-key
 	// manipulation check.
 	CheckIDResponseSplitting harnessx.CheckID = "response-splitting"
+	// CheckIDCPDoS is the §5 Cache-Poisoned Denial-of-Service check (the
+	// 2019 CPDoS disclosure's HHO/HMC/HMO variants).
+	CheckIDCPDoS harnessx.CheckID = "cpdos"
 	// CheckIDConsistency is the §6 response-consistency & correctness check.
 	CheckIDConsistency harnessx.CheckID = "consistency"
 	// CheckIDStaleServing is the §9 stale-while-revalidate/stale-if-error

@@ -25,12 +25,33 @@ Identifies the CDN/reverse proxy in front of a resource and flags evidence of mu
 | Vercel | `vercel` | `vercel-dns.com`, `vercel.app` |
 | Netlify | `netlify` | `netlify.app`, `netlifyglobalcdn.com` |
 | Pantheon | `pantheon` | `pantheonsite.io` |
+| Google Cloud CDN | `google frontend` (Server), `google` (Via) | — |
+| Azure Front Door | — | `azurefd.net`, `azureedge.net` |
+| Nginx (`proxy_cache`) | `nginx` | — |
+| KeyCDN | `keycdn-engine` | `kxcdn.com` |
+| Bunny CDN | `bunnycdn` | `b-cdn.net` |
 
 The full signature table, including each entry's cache-status header, lives in [`cache/cdn/registry.go`](https://github.com/cerberauth/cache-detective/blob/main/cache/cdn/registry.go).
 
 A `Server`/`Via`/CNAME that doesn't match any of the above isn't a dead end: the [live cache state](../live-cache-state/) check still falls back to generic header conventions and a timing/Age heuristic (see that page for the fallback chain) — this check just reports no CDN name in that case.
 
 **Missing your CDN or server?** [Open an issue](https://github.com/cerberauth/cache-detective/issues/new) with the `Server`/`Via`/cache-status headers and CNAME chain it emits. Adding an entry to the registry is a data change, not a code change, so most requests are a small PR.
+
+## Beyond fingerprinting: static extensions, cache-key notes, and quirks
+
+Each `Signature` in the registry also carries three fields the fingerprinting check itself doesn't consume, but that other checks and human reviewers do:
+
+- **`StaticExtensions`** — file extensions that CDN's default configuration treats as cacheable at the edge regardless of the origin's `Cache-Control` (e.g. `.css`, `.js`, `.jpg`). The [cache-deception check](../cache-poisoning-and-deception/) merges every registry entry's list ([`cdn.AllStaticExtensions`](https://github.com/cerberauth/cache-detective/blob/main/cache/cdn/registry.go)) into its path-confusion probe suffixes, so a newly documented default extension is automatically probed.
+- **`KeyNormalization`** — a free-text note on how/when that CDN normalizes cache-key inputs (query-string ordering/stripping, delimiter handling, case folding) relative to `Vary`/`Cache-Control` evaluation. This is documentation for interpreting an unexpected HIT/MISS, not something `Detect` matches against.
+- **`Quirks`** — known, disclosed CDN-specific caching behaviors or CVEs relevant to cache-poisoning/deception risk, each with an `ID`, `Description`, and `Reference` URL.
+
+### Known disclosed issues referenced in the registry
+
+| Quirk | Affected | Reference |
+|---|---|---|
+| [CPDoS](https://cpdos.org/) (2019) — cache-poisoned denial of service via an attacker-provoked origin error (oversized header, meta-character, or overridden method) getting cached | Cloudflare, Fastly, Akamai, Amazon CloudFront, Varnish | `cpdos-2019` quirk on each entry |
+| Cloudflare's short default TTL for select error status codes (e.g. 404/410) with no origin `Cache-Control` | Cloudflare | `cf-error-status-default-ttl` quirk |
+| [Pingora request-smuggling/cache-poisoning CVEs](https://blog.cloudflare.com/pingora-oss-smuggling-vulnerabilities/) (CVE-2026-2833, CVE-2026-2835, CVE-2026-2836) in standalone Pingora deployments — Cloudflare's own CDN wasn't affected since Pingora isn't used as its ingress proxy | Self-hosted Pingora-based proxies (not the Cloudflare CDN entry) | Cloudflare's advisory blog post |
 
 ## What's not implemented (yet)
 

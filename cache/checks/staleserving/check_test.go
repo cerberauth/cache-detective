@@ -35,7 +35,7 @@ func runCheck(t *testing.T, handler http.HandlerFunc, aggressive bool) harnessx.
 	engine := harnessx.New()
 	require.NoError(t, engine.Register(
 		checkbase.DiscoveryCheck,
-		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck,
 		cacheability.Check, staleserving.Check,
 	))
 

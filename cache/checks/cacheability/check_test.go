@@ -24,7 +24,7 @@ func runChecks(t *testing.T, pctx *checkbase.ProbeCtx, target string) harnessx.S
 	// registered alongside it for harnessx to resolve the dependency graph.
 	require.NoError(t, engine.Register(
 		checkbase.DiscoveryCheck,
-		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck,
 		cacheability.Check, cacheability.AuthCheck,
 	))
 

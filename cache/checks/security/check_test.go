@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cerberauth/harnessx"
@@ -146,6 +147,176 @@ func TestResponseSplittingCheck_DetectsInjectedHeader(t *testing.T) {
 	require.True(t, ok)
 	require.NotEmpty(t, res.Observations)
 	assert.Equal(t, "Response splitting via unkeyed input", res.Observations[0].Title)
+}
+
+func newCPDoSEngine(t *testing.T) *harnessx.Engine {
+	t.Helper()
+	return newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck)
+}
+
+func TestCPDoSCheck_GatedOffWithoutAggressive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New()}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	assert.False(t, res.Skipped)
+	assert.Empty(t, res.Observations)
+}
+
+// TestCPDoSCheck_DetectsHeaderOversizePoisoning simulates the CPDoS "HTTP
+// Header Oversize" (HHO) pattern: an origin that rejects an oversized
+// header block, fronted by a single-slot cache that stores and replays
+// that error to every subsequent caller of the path.
+func TestCPDoSCheck_DetectsHeaderOversizePoisoning(t *testing.T) {
+	var mu sync.Mutex
+	var cachedStatus int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if cachedStatus != 0 {
+			w.WriteHeader(cachedStatus)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		size := 0
+		for name, values := range r.Header {
+			for _, v := range values {
+				size += len(name) + len(v)
+			}
+		}
+		if size > 8192 {
+			mu.Lock()
+			cachedStatus = http.StatusRequestHeaderFieldsTooLarge
+			mu.Unlock()
+			w.WriteHeader(http.StatusRequestHeaderFieldsTooLarge)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, "CPDoS via oversized headers (HHO)", res.Observations[0].Title)
+}
+
+// TestCPDoSCheck_DetectsMethodOverridePoisoning simulates the CPDoS "HTTP
+// Method Override" (HMO) pattern.
+func TestCPDoSCheck_DetectsMethodOverridePoisoning(t *testing.T) {
+	var mu sync.Mutex
+	var cachedStatus int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if cachedStatus != 0 {
+			w.WriteHeader(cachedStatus)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		if r.Header.Get("X-HTTP-Method-Override") == "DELETE" {
+			mu.Lock()
+			cachedStatus = http.StatusMethodNotAllowed
+			mu.Unlock()
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, "CPDoS via method override (HMO)", res.Observations[0].Title)
+}
+
+// TestCPDoSCheck_DetectsMetaCharacterPoisoning simulates the CPDoS "HTTP
+// Meta Character" (HMC) pattern: the cache keys purely on the path, while
+// the origin inspects an existing query value.
+func TestCPDoSCheck_DetectsMetaCharacterPoisoning(t *testing.T) {
+	var mu sync.Mutex
+	var cachedStatus int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if cachedStatus != 0 {
+			w.WriteHeader(cachedStatus)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		if strings.ContainsRune(r.URL.Query().Get("name"), 0) {
+			mu.Lock()
+			cachedStatus = http.StatusBadRequest
+			mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL + "/?name=cache-detective"}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, "CPDoS via HTTP meta-character (HMC)", res.Observations[0].Title)
+}
+
+// TestCacheDeceptionCheck_DetectsDelimiterConfusion simulates web cache
+// deception via an origin-only path delimiter (";"): the cache decides
+// cacheability from whatever static-looking suffix follows the delimiter,
+// while the origin ignores the delimiter and keeps serving the same
+// dynamic, authenticated response.
+func TestCacheDeceptionCheck_DetectsDelimiterConfusion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("secret-account-data"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "account", URL: srv.URL + "/account"}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck)
+	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCacheDeception, "account")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, "Cache deception via path confusion", res.Observations[0].Title)
 }
 
 func findResult(summary harnessx.ScanSummary, id harnessx.CheckID, resourceID string) (harnessx.Result, bool) {

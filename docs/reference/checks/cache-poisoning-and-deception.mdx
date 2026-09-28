@@ -23,6 +23,8 @@ Injects a marker into headers commonly reflected but left unkeyed by CDNs (`X-Fo
 
 Appends a static-file extension or a nonexistent sub-path (`/nonexistent.js`, `.css`, `/nonexistent.jpg`, ...) to the resource's path and checks whether the (potentially authenticated) origin response is served — and looks cacheable — under that URL. This is [cache deception](https://cwe.mitre.org/data/definitions/524.html) via path confusion / static-extension probing.
 
+The static extensions probed come from the [CDN registry](./cdn-fingerprinting/#beyond-fingerprinting-static-extensions-cache-key-notes-and-quirks)'s `StaticExtensions` field (`cdn.AllStaticExtensions`) — every extension any registered CDN caches by default, deduplicated. The check also tries a handful of origin-only path delimiters (`;`, `%00`, `%0a`, `$`) ahead of the plain suffixes: some caches decide cacheability from whatever static-looking suffix follows one of these characters, while the origin ignores the delimiter and keeps routing on the full path — a distinct mechanism from a bare static extension, documented by PortSwigger's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) research.
+
 | Finding | Severity | CWE |
 |---|---|---|
 | Cache deception via path confusion | high | CWE-524 |
@@ -44,3 +46,19 @@ Injects a CRLF-encoded header/path fragment into an unkeyed input and checks whe
 | Response splitting via unkeyed input | critical | CWE-113 |
 
 This check depends on the unkeyed-header-injection check completing first (rather than just on resource discovery) — both manipulate the same unkeyed inputs on the same live resource, and running them concurrently could let one check's poisoning request land in the middle of the other's poison/confirm pair and mask its finding.
+
+## Cache-Poisoned Denial of Service (CPDoS)
+
+Reproduces the three variants from the original 2019 [CPDoS](https://cpdos.org/) disclosure (see the [CDN registry](./cdn-fingerprinting/#beyond-fingerprinting-static-extensions-cache-key-notes-and-quirks)'s `cpdos-2019` Quirk) against the live target, each as a poison-then-confirm pair: provoke an origin error, then check whether a follow-up **plain** request is served that same error back — meaning it was cached and is now being replayed to ordinary callers, not a one-off response to the probe itself.
+
+- **HTTP Header Oversize (HHO)** — an oversized header block a fronting cache accepts but the origin's own, smaller limit rejects.
+- **HTTP Method Override (HMO)** — an `X-HTTP-Method-Override: DELETE` header the origin honors (re-interpreting the request) but the cache ignores, keying purely on the real `GET` line.
+- **HTTP Meta Character (HMC)** — a control character injected into an *existing* query parameter's value, rejected by the origin's input validation while the cache keys on the path alone. Needs a resource with at least one query parameter to mutate; a bare path has no surface for this variant and is silently skipped.
+
+Stops after the first confirmed variant per resource: once one has poisoned a (typically single-slot) cache, the remaining variants would just observe that same residual poisoning rather than an independent finding.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| CPDoS via oversized headers (HHO) | high | CWE-444 |
+| CPDoS via method override (HMO) | high | CWE-444 |
+| CPDoS via HTTP meta-character (HMC) | high | CWE-444 |

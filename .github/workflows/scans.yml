@@ -182,6 +182,46 @@ jobs:
             vulnerable: false
             scan_args: "--aggressive"
             expect_title: "Cache deception via path confusion"
+          - challenge: "cache-deception-delimiter"
+            path: "/account"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Cache deception via path confusion"
+          - challenge: "cache-deception-delimiter"
+            path: "/account"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Cache deception via path confusion"
+          - challenge: "cache-cpdos-header-oversize"
+            path: "/"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "CPDoS via oversized headers (HHO)"
+          - challenge: "cache-cpdos-header-oversize"
+            path: "/"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "CPDoS via oversized headers (HHO)"
+          - challenge: "cache-cpdos-method-override"
+            path: "/"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "CPDoS via method override (HMO)"
+          - challenge: "cache-cpdos-method-override"
+            path: "/"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "CPDoS via method override (HMO)"
+          - challenge: "cache-cpdos-meta-character"
+            path: "/?name=cache-detective"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "CPDoS via HTTP meta-character (HMC)"
+          - challenge: "cache-cpdos-meta-character"
+            path: "/?name=cache-detective"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "CPDoS via HTTP meta-character (HMC)"
           - challenge: "cache-poisoning-unkeyed-header"
             path: "/"
             vulnerable: true

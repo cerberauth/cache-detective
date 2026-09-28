@@ -47,7 +47,7 @@ func TestCheck_MissThenHit(t *testing.T) {
 	// cacheability.Def's DependsOn comment.
 	require.NoError(t, engine.Register(
 		checkbase.DiscoveryCheck,
-		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck,
 		cacheability.Check, livestate.Check,
 	))
 
@@ -82,7 +82,7 @@ func TestCheck_CacheableButNeverHit(t *testing.T) {
 	// cacheability.Def's DependsOn comment.
 	require.NoError(t, engine.Register(
 		checkbase.DiscoveryCheck,
-		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck,
 		cacheability.Check, livestate.Check,
 	))
 

@@ -37,9 +37,10 @@
 | CDN/reverse-proxy fingerprinting (CNAME + Server/Via) | ✓ |
 | Declared vs. observed cache-key (`Vary`) analysis | ✓ |
 | Unkeyed header injection probing | `--aggressive` |
-| Cache deception (path confusion / static-extension) probing | `--aggressive` |
+| Cache deception (path confusion / static-extension / delimiter) probing | `--aggressive` |
 | Error-response caching probing | `--aggressive` |
 | Response splitting probing | `--aggressive` |
+| Cache-Poisoned Denial of Service (CPDoS: header oversize, method override, meta-character) probing | `--aggressive` |
 | Conditional-request (304) validation, redirect caching | ✓ |
 | stale-while-revalidate behavior confirmation (RFC 5861) | ✓ |
 | stale-if-error behavior confirmation (RFC 5861) | `--aggressive` |
@@ -61,8 +62,15 @@ Live cache-state detection ([§2](#architecture)) and CDN fingerprinting ([§3](
 | Vercel | `X-Vercel-Cache` | `vercel` | `vercel-dns.com`, `vercel.app` |
 | Netlify | `X-Nf-Request-Id` (presence only — Netlify emits no HIT/MISS verdict, see fallback below) | `netlify` | `netlify.app`, `netlifyglobalcdn.com` |
 | Pantheon | `X-Cache` | `pantheon` | `pantheonsite.io` |
+| Google Cloud CDN | — (no client-visible verdict; see fallback below) | `google frontend` (Server), `google` (Via) | — |
+| Azure Front Door | `X-Cache` | — | `azurefd.net`, `azureedge.net` |
+| Nginx (`proxy_cache`) | `X-Cache-Status` | `nginx` | — |
+| KeyCDN | `X-Cache` | `keycdn-engine` | `kxcdn.com` |
+| Bunny CDN | `CDN-Cache` | `bunnycdn` | `b-cdn.net` |
 
 Several entries share `X-Cache` with different value vocabularies (e.g. Fastly's `hit`/`miss`/`pass` vs. Akamai's `TCP_HIT`/`TCP_MISS`/...) — `Detect` disambiguates by fingerprinting the CDN from `Server`/`Via` (or CNAME) *first*, then reads that CDN's own header, rather than guessing from the header value alone.
+
+Each entry also documents, as data rather than code: **known static-asset extensions** it caches by default (fed into the cache-deception check's, see [Features](#features), path-confusion probes), a **cache-key normalization note** (query-string/delimiter handling relative to `Vary`), and **known disclosed quirks/CVEs** (e.g. the [CPDoS](https://cpdos.org/) 2019 cross-CDN disclosure, Cloudflare's default error-response TTL, the 2026 Pingora smuggling/cache-poisoning CVEs).
 
 ### Fallback for everything else
 
@@ -282,12 +290,12 @@ Each numbered section below is one `harnessx.Check` (or a small family of them),
 | 2 | `cache/checks/livestate` | Multi-request HIT/MISS/STALE/EXPIRED/BYPASS detection via the CDN registry, with a timing/Age heuristic fallback |
 | 3 | `cache/checks/fingerprint` | CNAME chain resolution + Server/Via matching (via the CDN registry) + multi-tier cache evidence |
 | 4 | `cache/checks/varykey` | Declared-`Vary` vs. observed cache-key inclusion for Accept-Encoding/Accept-Language/User-Agent/a custom header |
-| 5 | `cache/checks/security` | Unkeyed header injection, cache deception (path confusion / static-extension), error-response caching, response splitting — all `--aggressive`-gated |
+| 5 | `cache/checks/security` | Unkeyed header injection, cache deception (path confusion / static-extension / delimiter), error-response caching, response splitting, CPDoS (header oversize / method override / meta-character) — all `--aggressive`-gated |
 | 6 | `cache/checks/consistency` | Conditional-request (304) validation, redirect caching |
 | 7 | `cache/crawl` | URL list / sitemap / `.har` import / same-origin crawl with scope + `robots.txt` courtesy, resolved **before** the engine runs |
 | 8 | `cache/geo` | `Provider` interface + `NoopProvider` for future multi-region probing — no real geo backend ships in v1 |
 | 9 | `cache/checks/staleserving` | Confirms declared `stale-while-revalidate`/`stale-if-error` (RFC 5861) are actually honored by the fronting cache — `stale-if-error` confirmation is `--aggressive`-gated, since it means simulating an origin failure |
-| — | `cache/cdn` | The extensible CDN signature table (Cloudflare, Fastly, Akamai, CloudFront, Varnish, Vercel, Netlify, Pantheon, ...) every detection/fingerprint check reads from |
+| — | `cache/cdn` | The extensible CDN signature table (Cloudflare, Fastly, Akamai, CloudFront, Varnish, Vercel, Netlify, Pantheon, Google Cloud CDN, Azure Front Door, Nginx, KeyCDN, Bunny CDN, ...) every detection/fingerprint check reads from, plus known static-extension lists, cache-key normalization notes, and disclosed quirks/CVEs per entry |
 | — | `cache/checkbase` | Shared `ProbeCtx` (the scan-wide config every check reads from `Target.Data`), request-building helpers, and `DiscoveryCheck` |
 | — | `cache/probe.go` | `BuildChecks`/`CheckDefs`/`ScanAll` — wires every check into one `harnessx.Engine.Run` |
 
@@ -316,7 +324,7 @@ Per the project's phased build-out, §1 (cacheability) and §2 (live-state) are 
 ## Known limitations
 
 - **Findings carry no per-instance URL/parameter.** reportx's `Finding.URL`/`Finding.Parameter` fields (used by `diff` to identify "the same finding" across two scans) aren't populated by any check yet — the resource a finding came from is only in its Description/Evidence text. Two findings with the same title from the same check against the same resource (e.g. cache deception firing for more than one probed path suffix) are therefore indistinguishable to `diff` today; it only tracks presence and severity per title, not per instance.
-- **The §5 security checks are gated inside `Run`, not via `harnessx.SkipDecision`.** `x/reportx/harnessreport`'s bridge turns *every* check-level `Skip` into a reportx Finding (using the check's Name/CVSS as an inert placeholder), with no way to distinguish "explicitly gated off" from "ran and found nothing" or "genuinely vulnerable" in the JSON output. Since the four aggressive-only checks are gated off on every default scan, using `Skip` for that would put four misleading entries in every report's `--output-format json`. See `aggressiveGate`'s doc comment in `cache/checks/security/check.go`.
+- **The §5 security checks are gated inside `Run`, not via `harnessx.SkipDecision`.** `x/reportx/harnessreport`'s bridge turns *every* check-level `Skip` into a reportx Finding (using the check's Name/CVSS as an inert placeholder), with no way to distinguish "explicitly gated off" from "ran and found nothing" or "genuinely vulnerable" in the JSON output. Since the five aggressive-only checks are gated off on every default scan, using `Skip` for that would put five misleading entries in every report's `--output-format json`. See `aggressiveGate`'s doc comment in `cache/checks/security/check.go`.
 
 ---
 

@@ -30,7 +30,7 @@ func runCheck(t *testing.T, handler http.HandlerFunc) (harnessx.ScanSummary, str
 	// §5 security-check chain — see cacheability.Def's DependsOn comment.
 	require.NoError(t, engine.Register(
 		checkbase.DiscoveryCheck,
-		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck,
+		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck,
 		cacheability.Check, consistency.Check,
 	))
 

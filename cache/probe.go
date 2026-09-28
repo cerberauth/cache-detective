@@ -52,6 +52,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		security.CacheDeceptionCheck,
 		security.ErrorCachingCheck,
 		security.ResponseSplittingCheck,
+		security.CPDoSCheck,
 	}
 
 	defs := map[harnessx.CheckID]checkbase.CheckDef{
@@ -66,6 +67,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDCacheDeception:    security.CacheDeceptionDef,
 		checkbase.CheckIDErrorCaching:      security.ErrorCachingDef,
 		checkbase.CheckIDResponseSplitting: security.ResponseSplittingDef,
+		checkbase.CheckIDCPDoS:             security.CPDoSDef,
 	}
 	return checks, defs
 }

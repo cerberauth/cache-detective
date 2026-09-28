@@ -83,7 +83,16 @@ func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harn
 		}
 		budget -= 2
 
-		poisonReq, err := checkbase.NewRequest(ctx, resource.URL, pctx, http.Header{header: {marker}})
+		// A fresh cache-buster token per header attempt: the poison and
+		// confirm requests below share it, so they land on the same
+		// isolated cache entry instead of the resource's real, canonical
+		// one — see CacheBusterConfig.
+		busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+		if err != nil {
+			continue
+		}
+
+		poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{header: {marker}}))
 		if err != nil {
 			continue
 		}
@@ -98,7 +107,7 @@ func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harn
 			continue
 		}
 
-		confirmReq, err := checkbase.NewRequest(ctx, resource.URL, pctx, nil)
+		confirmReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, busterProbe.Header)
 		if err != nil {
 			continue
 		}
@@ -287,7 +296,15 @@ func runErrorCaching(ctx context.Context, target harnessx.Target, resource harne
 	}
 	pctx := target.Data.(*checkbase.ProbeCtx)
 
-	req, err := checkbase.NewRequest(ctx, resource.URL, pctx, http.Header{"Range": {"bytes=999999999-"}})
+	// The probe itself provokes the error, so it's built against a
+	// cache-buster-isolated URL: if the origin's error response turns out
+	// to be cacheable, it's the buster's cache entry that carries it, not
+	// the resource's real, canonical one.
+	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+	if err != nil {
+		return harnessx.Result{}, err
+	}
+	req, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{"Range": {"bytes=999999999-"}}))
 	if err != nil {
 		return harnessx.Result{}, err
 	}
@@ -357,9 +374,15 @@ func runResponseSplitting(ctx context.Context, target harnessx.Target, resource 
 	// literal header in the parsed response, which is what's checked for.
 	payload := "x%0d%0a" + injectedHeaderName + ":%20injected"
 
-	req, err := checkbase.NewRequest(ctx, resource.URL+withMarkerQuery(resource.URL, payload), pctx, http.Header{
+	// Cache-buster-isolated, same as the other §5 checks: this probe writes
+	// an attacker-controlled header into whatever cache entry it lands on.
+	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+	if err != nil {
+		return harnessx.Result{}, err
+	}
+	req, err := checkbase.NewRequest(ctx, busterProbe.URL+withMarkerQuery(busterProbe.URL, payload), pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{
 		"X-Forwarded-Host": {payload},
-	})
+	}))
 	if err != nil {
 		return harnessx.Result{}, err
 	}
@@ -458,13 +481,16 @@ func runCPDoS(ctx context.Context, target harnessx.Target, resource harnessx.Res
 	return harnessx.Result{Observations: obs}, nil
 }
 
-// cpdosConfirm reissues a plain, unmodified GET against resource.URL after
-// a poisoning probe and reports whether the same error status came back —
-// i.e. whether the provoked error was cached and is now being replayed to
-// ordinary callers, rather than being a one-off response to the probe
-// itself.
-func cpdosConfirm(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, poisonedStatus int) bool {
-	confirmReq, err := checkbase.NewRequest(ctx, resource.URL, pctx, nil)
+// cpdosConfirm reissues a plain request against bustedURL (and its buster
+// header, if any) after a poisoning probe and reports whether the same
+// error status came back — i.e. whether the provoked error was cached and
+// is now being replayed to ordinary callers, rather than being a one-off
+// response to the probe itself. bustedURL/busterHeader must be the exact
+// CacheBusterProbe the poisoning request used, so the confirm request lands
+// on the same isolated cache entry instead of the resource's real,
+// canonical one.
+func cpdosConfirm(ctx context.Context, pctx *checkbase.ProbeCtx, bustedURL string, busterHeader http.Header, poisonedStatus int) bool {
+	confirmReq, err := checkbase.NewRequest(ctx, bustedURL, pctx, busterHeader)
 	if err != nil {
 		return false
 	}
@@ -478,7 +504,11 @@ func cpdosConfirm(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnes
 // probeCPDoSHeaderOversize implements CPDoS's "HTTP Header Oversize" (HHO)
 // variant: a header block a fronting cache accepts but the origin doesn't.
 func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource) (harnessx.Observation, bool) {
-	poisonReq, err := checkbase.NewRequest(ctx, resource.URL, pctx, http.Header{"X-Cache-Detective-Padding": {cpdosHeaderPadding}})
+	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+	if err != nil {
+		return harnessx.Observation{}, false
+	}
+	poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{"X-Cache-Detective-Padding": {cpdosHeaderPadding}}))
 	if err != nil {
 		return harnessx.Observation{}, false
 	}
@@ -487,7 +517,7 @@ func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, res
 		return harnessx.Observation{}, false
 	}
 
-	if !cpdosConfirm(ctx, pctx, resource, poisoned.StatusCode) {
+	if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
 		return harnessx.Observation{}, false
 	}
 	return harnessx.Observation{
@@ -504,7 +534,11 @@ func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, res
 // variant: a header letting the origin re-interpret a GET as another
 // method, invisibly to the cache which keys purely on the real method/line.
 func probeCPDoSMethodOverride(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource) (harnessx.Observation, bool) {
-	poisonReq, err := checkbase.NewRequest(ctx, resource.URL, pctx, http.Header{"X-HTTP-Method-Override": {"DELETE"}})
+	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+	if err != nil {
+		return harnessx.Observation{}, false
+	}
+	poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{"X-HTTP-Method-Override": {"DELETE"}}))
 	if err != nil {
 		return harnessx.Observation{}, false
 	}
@@ -513,7 +547,7 @@ func probeCPDoSMethodOverride(ctx context.Context, pctx *checkbase.ProbeCtx, res
 		return harnessx.Observation{}, false
 	}
 
-	if !cpdosConfirm(ctx, pctx, resource, poisoned.StatusCode) {
+	if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
 		return harnessx.Observation{}, false
 	}
 	return harnessx.Observation{
@@ -551,7 +585,11 @@ func probeCPDoSMetaCharacter(ctx context.Context, pctx *checkbase.ProbeCtx, reso
 	pq.Set(param, pq.Get(param)+cpdosMetaCharacters[0])
 	poisonedURL.RawQuery = pq.Encode()
 
-	poisonReq, err := checkbase.NewRequest(ctx, poisonedURL.String(), pctx, nil)
+	busterProbe, err := checkbase.NewCacheBusterProbe(poisonedURL.String(), pctx)
+	if err != nil {
+		return harnessx.Observation{}, false
+	}
+	poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, busterProbe.Header)
 	if err != nil {
 		return harnessx.Observation{}, false
 	}
@@ -560,7 +598,7 @@ func probeCPDoSMetaCharacter(ctx context.Context, pctx *checkbase.ProbeCtx, reso
 		return harnessx.Observation{}, false
 	}
 
-	if !cpdosConfirm(ctx, pctx, resource, poisoned.StatusCode) {
+	if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
 		return harnessx.Observation{}, false
 	}
 	return harnessx.Observation{

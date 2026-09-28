@@ -92,12 +92,25 @@ cache-detective scan --list urls.txt --auth-profiles auth-profiles.json
 |---|---|---|
 | `--aggressive` | `false` | Enable cache poisoning/deception probing |
 | `--max-aggressive-requests` | `10` | Hard cap on extra probe requests per resource for `--aggressive` checks (and the read-only vary-key check), even with `--aggressive` set |
+| `--cache-buster-mode` | `query` | How `--aggressive` checks isolate poison/confirm requests from the resource's real cache entry: `query`, `header`, or `both` |
+| `--cache-buster-param` | `cd_cachebuster` | Query parameter name used in `query`/`both` cache-buster mode |
+| `--cache-buster-header` | `X-Cache-Detective-Buster` | Request header name used in `header`/`both` cache-buster mode |
 
 ```sh
 cache-detective scan --url https://staging.example.com/ --aggressive
 ```
 
 `--aggressive` also gates [stale-if-error confirmation](../checks/stale-serving/#stale-if-error) — since confirming it means asking the origin to simulate a failure.
+
+### Cache-buster isolation
+
+Every check that writes attacker-controlled content or an error response back through the resource's own URL (unkeyed header injection, error-response caching, response splitting, CPDoS) sends its poison-then-confirm request pair to a cache-buster-isolated URL/header instead of the plain resource URL — a fresh random token per attempt, reused for both the poisoning request and its confirmation. This is what lets the check confirm a shared cache actually replays what it just planted, without ever poisoning the cache entry a real visitor's plain request to that URL would read from.
+
+If a target's cache normalizes/strips one buster form (e.g. drops unrecognized query params), point it at the other:
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive --cache-buster-mode header
+```
 
 ## Output
 

@@ -11,6 +11,10 @@ import { Aside } from '@/components/docs';
   Every check on this page only runs with `--aggressive` — a positive result means the probe just demonstrated it can plant content in a shared cache other users may be served. Only run these against systems you own or have explicit written permission to test. `--max-aggressive-requests` (default `10`) hard-caps extra requests per resource even with `--aggressive` set.
 </Aside>
 
+## Cache-buster isolation
+
+Unkeyed header injection, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../../cli/scan/#cache-buster-isolation).
+
 ## Unkeyed header injection
 
 Injects a marker into headers commonly reflected but left unkeyed by CDNs (`X-Forwarded-Host`, `X-Forwarded-Scheme`, `X-Original-URL`, `X-Rewrite-URL`), then sends a follow-up plain request to check whether it receives the poisoned response back — the classic [web cache poisoning](https://portswigger.net/web-security/web-cache-poisoning) technique.

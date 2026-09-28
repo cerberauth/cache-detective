@@ -22,29 +22,32 @@ import (
 )
 
 var (
-	scanURL             string
-	scanListFile        string
-	scanSitemapURL      string
-	scanHARFile         string
-	scanCrawl           bool
-	scanPathPrefix      string
-	scanMaxPages        int
-	scanRespectRobots   bool
-	scanMethod          string
-	scanHeaders         []string
-	scanCookies         []string
-	scanBearer          string
-	scanAuthProfiles    string
-	scanMaxRetries      int
-	scanRetryDelay      time.Duration
-	scanRequestCount    int
-	scanRequestInterval time.Duration
-	scanTimeout         time.Duration
-	scanStaleWindowWait time.Duration
-	scanAggressive      bool
-	scanMaxAggressive   int
-	scanMaxConcurrency  int
-	scanMaxResourceConc int
+	scanURL               string
+	scanListFile          string
+	scanSitemapURL        string
+	scanHARFile           string
+	scanCrawl             bool
+	scanPathPrefix        string
+	scanMaxPages          int
+	scanRespectRobots     bool
+	scanMethod            string
+	scanHeaders           []string
+	scanCookies           []string
+	scanBearer            string
+	scanAuthProfiles      string
+	scanMaxRetries        int
+	scanRetryDelay        time.Duration
+	scanRequestCount      int
+	scanRequestInterval   time.Duration
+	scanTimeout           time.Duration
+	scanStaleWindowWait   time.Duration
+	scanAggressive        bool
+	scanMaxAggressive     int
+	scanCacheBusterMode   string
+	scanCacheBusterParam  string
+	scanCacheBusterHeader string
+	scanMaxConcurrency    int
+	scanMaxResourceConc   int
 )
 
 var scanOtelName = "github.com/cerberauth/cache-detective/cmd/scan"
@@ -66,7 +69,11 @@ Security-focused checks (cache poisoning / cache deception probing) are
 opt-in via --aggressive, since a positive result means the check just
 demonstrated it can plant content in a shared cache other users may be
 served. --max-aggressive-requests hard-caps how many extra requests any one
-aggressive check issues per resource, even with --aggressive set.
+aggressive check issues per resource, even with --aggressive set. Every
+aggressive check isolates its poison/confirm request pairs from the
+resource's real, canonical cache entry with a per-attempt cache-buster
+(--cache-buster-mode/--cache-buster-param/--cache-buster-header), so testing
+doesn't poison real users.
 
 Use only against systems you own or have explicit written permission to test.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,6 +85,12 @@ Use only against systems you own or have explicit written permission to test.`,
 		}
 		if len(resources) == 0 {
 			return fmt.Errorf("no resources to scan")
+		}
+
+		switch checkbase.CacheBusterMode(scanCacheBusterMode) {
+		case checkbase.CacheBusterQuery, checkbase.CacheBusterHeader, checkbase.CacheBusterBoth:
+		default:
+			return fmt.Errorf("--cache-buster-mode must be one of: query, header, both")
 		}
 
 		var authProfiles map[string]checkbase.AuthProfile
@@ -101,7 +114,12 @@ Use only against systems you own or have explicit written permission to test.`,
 			StaleWindowMaxWait:    scanStaleWindowWait,
 			Aggressive:            scanAggressive,
 			MaxAggressiveRequests: scanMaxAggressive,
-			Resources:             resources,
+			CacheBuster: checkbase.CacheBusterConfig{
+				Mode:       checkbase.CacheBusterMode(scanCacheBusterMode),
+				QueryParam: scanCacheBusterParam,
+				HeaderName: scanCacheBusterHeader,
+			},
+			Resources: resources,
 		}
 
 		sinks, cleanup, err := cobrareportx.SinksFromFlags(cmd)
@@ -249,6 +267,9 @@ func init() {
 	scanCmd.Flags().DurationVar(&scanStaleWindowWait, "stale-window-max-wait", 30*time.Second, "Maximum time to wait for a resource to enter its declared stale-while-revalidate window before giving up on actively confirming it")
 	scanCmd.Flags().BoolVar(&scanAggressive, "aggressive", false, "Enable cache poisoning/deception probing (§5) — opt-in since it intentionally probes for exploitable cache behavior")
 	scanCmd.Flags().IntVar(&scanMaxAggressive, "max-aggressive-requests", 10, "Hard cap on extra probe requests per resource for --aggressive checks (and the read-only vary-key check)")
+	scanCmd.Flags().StringVar(&scanCacheBusterMode, "cache-buster-mode", "query", "How --aggressive checks isolate poison/confirm requests from the resource's real cache entry: \"query\", \"header\", or \"both\"")
+	scanCmd.Flags().StringVar(&scanCacheBusterParam, "cache-buster-param", "cd_cachebuster", "Query parameter name used in \"query\"/\"both\" cache-buster mode")
+	scanCmd.Flags().StringVar(&scanCacheBusterHeader, "cache-buster-header", "X-Cache-Detective-Buster", "Request header name used in \"header\"/\"both\" cache-buster mode")
 	scanCmd.Flags().IntVar(&scanMaxConcurrency, "max-concurrency", 0, "Maximum concurrent checks (default: number of CPUs)")
 	scanCmd.Flags().IntVar(&scanMaxResourceConc, "max-resource-concurrency", 0, "Maximum concurrent resources per check (default: number of CPUs)")
 

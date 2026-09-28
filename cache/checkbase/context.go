@@ -89,6 +89,13 @@ type ProbeCtx struct {
 	// credentials applied to every resource. A resource whose origin has no
 	// matching entry falls back to the top-level Headers/Cookies/BearerToken.
 	AuthProfiles map[string]AuthProfile
+
+	// CacheBuster configures the per-attempt query param / header every §5
+	// active-probing check (unkeyed-input mining, delimiter mapping,
+	// poisoning/deception tests) uses to isolate its poison/confirm request
+	// pairs from the resource's real, canonical cache entry — see
+	// CacheBusterConfig.
+	CacheBuster CacheBusterConfig
 }
 
 // AuthProfile is a set of credentials (headers, cookies, bearer token)
@@ -156,6 +163,7 @@ func (c ProbeCtx) WithDefaults() ProbeCtx {
 	if c.BearerToken != "" || len(c.Cookies) > 0 {
 		c.Authenticated = true
 	}
+	c.CacheBuster = c.CacheBuster.withDefaults()
 	return c
 }
 

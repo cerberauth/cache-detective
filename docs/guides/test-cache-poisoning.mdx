@@ -36,6 +36,16 @@ cache-detective scan --url https://staging.example.com/account --aggressive \
 
 If the response is served identically (and cacheably) under a path-confused URL like `/account.js` or `/account/nonexistent.css`, you'll see a **Cache deception via path confusion** finding (high severity, CWE-524). Combined with credentials, also check for **Authenticated response marked cacheable** (see [Cacheability analysis](../reference/checks/cacheability/#authenticated-response-marked-cacheable)) — that check runs by default, without `--aggressive`, since it's a passive analysis of the response your own request received.
 
+## Cache-buster isolation
+
+Poison/confirm request pairs (unkeyed header injection, error-response caching, response splitting, CPDoS) go to a per-attempt, cache-buster-isolated URL/header rather than the resource's plain canonical URL — so confirming a finding never leaves the resource's real cache entry poisoned for other visitors. If a target's cache strips query params (or, less commonly, unrecognized headers) from its cache key, switch forms:
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive --cache-buster-mode header
+```
+
+See [`scan`'s cache-buster flags](../reference/cli/scan/#cache-buster-isolation) for `--cache-buster-param`/`--cache-buster-header`.
+
 ## Interpreting a finding
 
 ```sh

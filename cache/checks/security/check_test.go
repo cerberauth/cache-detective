@@ -73,6 +73,46 @@ func TestUnkeyedHeaderCheck_DetectsPoisoning(t *testing.T) {
 	assert.Contains(t, res.Observations[0].Title, "Unkeyed header injection")
 }
 
+// TestUnkeyedHeaderCheck_DoesNotPoisonCanonicalURL simulates a cache keyed
+// by the exact request URL (path+query), the common case a cache-buster
+// query param actually isolates against. It asserts the check still
+// detects the poisoning surface while never leaving the resource's real,
+// canonical URL (no query string at all) poisoned for a plain follow-up
+// request a real user could make — the safety property issue #10 requires.
+func TestUnkeyedHeaderCheck_DoesNotPoisonCanonicalURL(t *testing.T) {
+	var mu sync.Mutex
+	cached := map[string]string{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.String()
+		mu.Lock()
+		defer mu.Unlock()
+		if v := r.Header.Get("X-Forwarded-Host"); v != "" {
+			cached[key] = "host=" + v
+		}
+		if body, ok := cached[key]; ok {
+			w.Write([]byte(body))
+			return
+		}
+		w.Write([]byte("host="))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck)
+	_, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	resp, err := http.Get(srv.URL)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body := make([]byte, 128)
+	n, _ := resp.Body.Read(body)
+	assert.NotContains(t, string(body[:n]), "cache-detective-poison-marker.invalid", "the resource's real, canonical URL must never be poisoned by the probe")
+}
+
 func TestCacheDeceptionCheck_DetectsPathConfusion(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Any path under /account is served the same "authenticated"

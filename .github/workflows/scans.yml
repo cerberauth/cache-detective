@@ -232,6 +232,16 @@ jobs:
             vulnerable: false
             scan_args: "--aggressive"
             expect_title: "Unkeyed header injection"
+          - challenge: "cache-poisoning-unkeyed-header"
+            path: "/"
+            vulnerable: true
+            scan_args: "--aggressive --cache-buster-mode header"
+            expect_title: "Unkeyed header injection"
+          - challenge: "cache-poisoning-unkeyed-header"
+            path: "/"
+            vulnerable: false
+            scan_args: "--aggressive --cache-buster-mode header"
+            expect_title: "Unkeyed header injection"
           - challenge: "cache-sensitive-data-exposure"
             path: "/dashboard"
             vulnerable: true

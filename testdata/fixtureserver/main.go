@@ -98,6 +98,36 @@ func main() {
 		_, _ = w.Write([]byte(cachedPoison))
 	})
 
+	// /poison-cookie and /poison-param: the same unkeyed, single-slot cache
+	// simulation as /poison, but driven by a "debug" cookie / "debug" query
+	// parameter instead of a header — both are bundled default-wordlist
+	// candidates the unkeyed-input miner (§5) mines by default, exercising
+	// its cookie and query-parameter axes alongside the existing
+	// header-axis /poison fixture.
+	cachedCookiePoison := "debug="
+	mux.HandleFunc("/poison-cookie", func(w http.ResponseWriter, r *http.Request) {
+		if !*vulnerable {
+			_, _ = w.Write([]byte("debug="))
+			return
+		}
+		if c, err := r.Cookie("debug"); err == nil && c.Value != "" {
+			cachedCookiePoison = "debug=" + c.Value
+		}
+		_, _ = w.Write([]byte(cachedCookiePoison))
+	})
+
+	cachedParamPoison := "debug="
+	mux.HandleFunc("/poison-param", func(w http.ResponseWriter, r *http.Request) {
+		if !*vulnerable {
+			_, _ = w.Write([]byte("debug="))
+			return
+		}
+		if v := r.URL.Query().Get("debug"); v != "" {
+			cachedParamPoison = "debug=" + v
+		}
+		_, _ = w.Write([]byte(cachedParamPoison))
+	})
+
 	// /stale: exercises the stale-while-revalidate / stale-if-error check
 	// (§9). In fixed mode it behaves like a real edge cache: it serves the
 	// last-known-good body promptly once the response enters its

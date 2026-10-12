@@ -15,7 +15,7 @@ import { Aside } from '@/components/docs';
 cache-detective scan --url https://staging.example.com/ --aggressive
 ```
 
-This enables the five checks documented in [Cache poisoning & deception](../reference/checks/cache-poisoning-and-deception/): unkeyed header injection, cache deception, error-response caching, response splitting via cache-key manipulation, and Cache-Poisoned Denial of Service (CPDoS). Every other check (cacheability, live cache state, CDN fingerprinting, cache key & Vary, response consistency) runs regardless of `--aggressive`.
+This enables the five checks documented in [Cache poisoning & deception](../reference/checks/cache-poisoning-and-deception/): unkeyed input mining (headers, cookies, query parameters), cache deception, error-response caching, response splitting via cache-key manipulation, and Cache-Poisoned Denial of Service (CPDoS). Every other check (cacheability, live cache state, CDN fingerprinting, cache key & Vary, response consistency) runs regardless of `--aggressive`.
 
 ## Cap the request volume
 
@@ -36,9 +36,19 @@ cache-detective scan --url https://staging.example.com/account --aggressive \
 
 If the response is served identically (and cacheably) under a path-confused URL like `/account.js` or `/account/nonexistent.css`, you'll see a **Cache deception via path confusion** finding (high severity, CWE-524). Combined with credentials, also check for **Authenticated response marked cacheable** (see [Cacheability analysis](../reference/checks/cacheability/#authenticated-response-marked-cacheable)) — that check runs by default, without `--aggressive`, since it's a passive analysis of the response your own request received.
 
+## Mining beyond the bundled headers
+
+Unkeyed-input mining also probes cookies and query parameters against their own bundled default wordlists, and `--unkeyed-wordlist` lets you supplement all three with app-specific candidate names:
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive --unkeyed-wordlist wordlist.txt
+```
+
+Since `--max-aggressive-requests` is shared across all three surfaces (headers mined before cookies before query parameters), raise it when mining a large custom wordlist — see [`scan`'s unkeyed-input mining wordlist section](../reference/cli/scan/#unkeyed-input-mining-wordlist).
+
 ## Cache-buster isolation
 
-Poison/confirm request pairs (unkeyed header injection, error-response caching, response splitting, CPDoS) go to a per-attempt, cache-buster-isolated URL/header rather than the resource's plain canonical URL — so confirming a finding never leaves the resource's real cache entry poisoned for other visitors. If a target's cache strips query params (or, less commonly, unrecognized headers) from its cache key, switch forms:
+Poison/confirm request pairs (unkeyed input mining, error-response caching, response splitting, CPDoS) go to a per-attempt, cache-buster-isolated URL/header rather than the resource's plain canonical URL — so confirming a finding never leaves the resource's real cache entry poisoned for other visitors. If a target's cache strips query params (or, less commonly, unrecognized headers) from its cache key, switch forms:
 
 ```sh
 cache-detective scan --url https://staging.example.com/ --aggressive --cache-buster-mode header

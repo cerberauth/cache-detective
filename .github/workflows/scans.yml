@@ -124,6 +124,58 @@ jobs:
             echo "No finding for the fixed /poison fixture, as expected"
           fi
 
+      - name: Scan /poison-cookie for unkeyed cookie injection (aggressive)
+        # --max-aggressive-requests raised above its default (10): the
+        # unkeyed-input miner mines headers before cookies, so a cookie-axis
+        # finding needs enough budget to exhaust the (larger) header
+        # wordlist first and still have budget left for the cookie axis.
+        run: |
+          ./cache-detective scan --url http://localhost:8080/poison-cookie --requests 1 --aggressive --max-aggressive-requests 20 --sqa-opt-out \
+            --output-format json --output poison-cookie-report.json --quiet
+
+      - name: Check unkeyed-cookie-injection result matches expected vulnerability state
+        run: |
+          count=$(jq '[.findings[] | select(.title | startswith("Unkeyed cookie injection"))] | length' poison-cookie-report.json)
+          if [ "${{ matrix.vulnerable }}" = "true" ]; then
+            if [ "$count" -eq 0 ]; then
+              echo "::error::No unkeyed-cookie-injection finding for the vulnerable /poison-cookie fixture"
+              exit 1
+            fi
+            echo "Found $count finding(s) for the vulnerable /poison-cookie fixture, as expected"
+          else
+            if [ "$count" -gt 0 ]; then
+              echo "::error::Unexpected unkeyed-cookie-injection finding for the fixed /poison-cookie fixture"
+              exit 1
+            fi
+            echo "No finding for the fixed /poison-cookie fixture, as expected"
+          fi
+
+      - name: Scan /poison-param for unkeyed query-parameter injection (aggressive)
+        # --max-aggressive-requests raised further: the miner mines headers,
+        # then cookies, then query parameters, so a query-parameter finding
+        # needs enough budget to exhaust both preceding axes' wordlists
+        # first.
+        run: |
+          ./cache-detective scan --url http://localhost:8080/poison-param --requests 1 --aggressive --max-aggressive-requests 50 --sqa-opt-out \
+            --output-format json --output poison-param-report.json --quiet
+
+      - name: Check unkeyed-query-parameter-injection result matches expected vulnerability state
+        run: |
+          count=$(jq '[.findings[] | select(.title | startswith("Unkeyed query parameter injection"))] | length' poison-param-report.json)
+          if [ "${{ matrix.vulnerable }}" = "true" ]; then
+            if [ "$count" -eq 0 ]; then
+              echo "::error::No unkeyed-query-parameter-injection finding for the vulnerable /poison-param fixture"
+              exit 1
+            fi
+            echo "Found $count finding(s) for the vulnerable /poison-param fixture, as expected"
+          else
+            if [ "$count" -gt 0 ]; then
+              echo "::error::Unexpected unkeyed-query-parameter-injection finding for the fixed /poison-param fixture"
+              exit 1
+            fi
+            echo "No finding for the fixed /poison-param fixture, as expected"
+          fi
+
       - name: Scan /stale for stale-while-revalidate/stale-if-error behavior (aggressive)
         run: |
           ./cache-detective scan --url http://localhost:8080/stale --requests 1 --aggressive --stale-window-max-wait 10s --sqa-opt-out \

@@ -113,6 +113,98 @@ func TestUnkeyedHeaderCheck_DoesNotPoisonCanonicalURL(t *testing.T) {
 	assert.NotContains(t, string(body[:n]), "cache-detective-poison-marker.invalid", "the resource's real, canonical URL must never be poisoned by the probe")
 }
 
+// TestUnkeyedHeaderCheck_DetectsCookiePoisoning simulates a naive shared
+// cache in front of an origin that reflects a "debug" cookie (one of the
+// bundled default cookie wordlist entries) into the body, with the cache
+// keying purely on path — proving cookie mining reaches the same
+// poison/confirm surface as header mining.
+func TestUnkeyedHeaderCheck_DetectsCookiePoisoning(t *testing.T) {
+	var cached string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie("debug"); err == nil && c.Value != "" {
+			cached = "debug=" + c.Value
+		}
+		w.Write([]byte(cached))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 100}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck)
+	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDUnkeyedHeader, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Contains(t, res.Observations[0].Title, "Unkeyed cookie injection via debug")
+}
+
+// TestUnkeyedHeaderCheck_DetectsQueryParamPoisoning simulates a naive
+// shared cache keying only on path (ignoring the query string) in front
+// of an origin that reflects a "debug" query parameter (one of the
+// bundled default query-parameter wordlist entries).
+func TestUnkeyedHeaderCheck_DetectsQueryParamPoisoning(t *testing.T) {
+	var cached string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.URL.Query().Get("debug"); v != "" {
+			cached = "debug=" + v
+		}
+		w.Write([]byte(cached))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 100}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck)
+	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDUnkeyedHeader, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Contains(t, res.Observations[0].Title, "Unkeyed query parameter injection via debug")
+}
+
+// TestUnkeyedHeaderCheck_CustomWordlist proves a candidate absent from
+// every bundled default wordlist is still mined when supplied via
+// ProbeCtx.UnkeyedInputWordlist (the CLI's --unkeyed-wordlist).
+func TestUnkeyedHeaderCheck_CustomWordlist(t *testing.T) {
+	var cached string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if v := r.Header.Get("X-Custom-Unkeyed"); v != "" {
+			cached = "custom=" + v
+		}
+		w.Write([]byte(cached))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{
+		Probe:                 probe.New(),
+		Aggressive:            true,
+		MaxAggressiveRequests: 100,
+		UnkeyedInputWordlist:  []string{"X-Custom-Unkeyed"},
+	}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck)
+	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDUnkeyedHeader, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	found := false
+	for _, ob := range res.Observations {
+		if strings.Contains(ob.Title, "X-Custom-Unkeyed") {
+			found = true
+		}
+	}
+	assert.True(t, found, "custom wordlist candidate should have been mined")
+}
+
 func TestCacheDeceptionCheck_DetectsPathConfusion(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Any path under /account is served the same "authenticated"

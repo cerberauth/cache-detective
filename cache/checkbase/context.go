@@ -96,6 +96,13 @@ type ProbeCtx struct {
 	// pairs from the resource's real, canonical cache entry — see
 	// CacheBusterConfig.
 	CacheBuster CacheBusterConfig
+
+	// UnkeyedInputWordlist supplements the bundled default candidate names
+	// the unkeyed-header-injection check (§5) mines across every input
+	// surface (headers, cookies, query parameters), letting a scan target
+	// app-specific input names the bundled wordlist doesn't cover. Loaded
+	// from a file via LoadWordlistFile.
+	UnkeyedInputWordlist []string
 }
 
 // AuthProfile is a set of credentials (headers, cookies, bearer token)

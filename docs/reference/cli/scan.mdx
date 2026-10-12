@@ -95,6 +95,7 @@ cache-detective scan --list urls.txt --auth-profiles auth-profiles.json
 | `--cache-buster-mode` | `query` | How `--aggressive` checks isolate poison/confirm requests from the resource's real cache entry: `query`, `header`, or `both` |
 | `--cache-buster-param` | `cd_cachebuster` | Query parameter name used in `query`/`both` cache-buster mode |
 | `--cache-buster-header` | `X-Cache-Detective-Buster` | Request header name used in `header`/`both` cache-buster mode |
+| `--unkeyed-wordlist` | *(none)* | Path to a newline-delimited wordlist of extra candidate names to supplement the bundled header/cookie/query-parameter unkeyed-input mining wordlists |
 
 ```sh
 cache-detective scan --url https://staging.example.com/ --aggressive
@@ -111,6 +112,23 @@ If a target's cache normalizes/strips one buster form (e.g. drops unrecognized q
 ```sh
 cache-detective scan --url https://staging.example.com/ --aggressive --cache-buster-mode header
 ```
+
+### Unkeyed-input mining wordlist
+
+The unkeyed-header-injection check (§5) mines each of three input surfaces — headers, cookies, and query parameters — against a bundled default wordlist per surface. `--unkeyed-wordlist` supplements all three with app-specific candidate names of your own, e.g. an internal feature-flag cookie or an API-gateway routing header the bundled lists don't cover:
+
+```txt title="wordlist.txt"
+# blank lines and "#" comments are ignored
+X-Internal-Route
+feature-flag
+api_version
+```
+
+```sh
+cache-detective scan --url https://staging.example.com/ --aggressive --unkeyed-wordlist wordlist.txt
+```
+
+`--max-aggressive-requests` is shared across all three surfaces (headers mined before cookies before query parameters), so mining the full bundled wordlist — let alone a custom one — may need raising it well past its default of `10`.
 
 ## Output
 

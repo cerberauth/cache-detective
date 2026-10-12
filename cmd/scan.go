@@ -46,6 +46,7 @@ var (
 	scanCacheBusterMode   string
 	scanCacheBusterParam  string
 	scanCacheBusterHeader string
+	scanUnkeyedWordlist   string
 	scanMaxConcurrency    int
 	scanMaxResourceConc   int
 )
@@ -101,6 +102,14 @@ Use only against systems you own or have explicit written permission to test.`,
 			}
 		}
 
+		var unkeyedWordlist []string
+		if scanUnkeyedWordlist != "" {
+			unkeyedWordlist, err = checkbase.LoadWordlistFile(scanUnkeyedWordlist)
+			if err != nil {
+				return err
+			}
+		}
+
 		pctx := checkbase.ProbeCtx{
 			Probe:                 probe.New(probe.WithMaxRetries(scanMaxRetries), probe.WithRetryDelay(scanRetryDelay), probe.WithTimeout(scanTimeout)),
 			Method:                scanMethod,
@@ -119,7 +128,8 @@ Use only against systems you own or have explicit written permission to test.`,
 				QueryParam: scanCacheBusterParam,
 				HeaderName: scanCacheBusterHeader,
 			},
-			Resources: resources,
+			UnkeyedInputWordlist: unkeyedWordlist,
+			Resources:            resources,
 		}
 
 		sinks, cleanup, err := cobrareportx.SinksFromFlags(cmd)
@@ -270,6 +280,7 @@ func init() {
 	scanCmd.Flags().StringVar(&scanCacheBusterMode, "cache-buster-mode", "query", "How --aggressive checks isolate poison/confirm requests from the resource's real cache entry: \"query\", \"header\", or \"both\"")
 	scanCmd.Flags().StringVar(&scanCacheBusterParam, "cache-buster-param", "cd_cachebuster", "Query parameter name used in \"query\"/\"both\" cache-buster mode")
 	scanCmd.Flags().StringVar(&scanCacheBusterHeader, "cache-buster-header", "X-Cache-Detective-Buster", "Request header name used in \"header\"/\"both\" cache-buster mode")
+	scanCmd.Flags().StringVar(&scanUnkeyedWordlist, "unkeyed-wordlist", "", "Path to a newline-delimited wordlist of extra candidate names to supplement the bundled header/cookie/query-parameter unkeyed-input mining wordlists (--aggressive)")
 	scanCmd.Flags().IntVar(&scanMaxConcurrency, "max-concurrency", 0, "Maximum concurrent checks (default: number of CPUs)")
 	scanCmd.Flags().IntVar(&scanMaxResourceConc, "max-resource-concurrency", 0, "Maximum concurrent resources per check (default: number of CPUs)")
 

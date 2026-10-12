@@ -50,8 +50,8 @@ func aggressiveGate(target harnessx.Target) bool {
 
 var UnkeyedHeaderDef = checkbase.CheckDef{
 	ID:          string(checkbase.CheckIDUnkeyedHeader),
-	Name:        "Unkeyed Header Injection",
-	Description: "Injects a marker via a header commonly left unkeyed by CDNs (e.g. X-Forwarded-Host) and checks whether a follow-up plain request receives the poisoned response — classic web cache poisoning.",
+	Name:        "Unkeyed Input Injection",
+	Description: "Wordlist-driven mining across headers, cookies, and query parameters commonly left unkeyed by CDNs: injects a marker via each candidate and checks whether a follow-up plain request receives the poisoned response — classic web cache poisoning (Kettle, \"Practical Web Cache Poisoning\", 2018; Param Miner).",
 	Tags:        []string{securityTag, cachePoisoningTag},
 	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
 	CVSSVector:  "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
@@ -62,28 +62,86 @@ var UnkeyedHeaderDef = checkbase.CheckDef{
 
 var UnkeyedHeaderCheck = checkdef.NewResourceCheck(UnkeyedHeaderDef, runUnkeyedHeader)
 
-// unkeyedHeaderCandidates are headers frequently reflected into a response
-// (redirects, canonical links, asset URLs) without being part of the cache
-// key — the textbook web-cache-poisoning unkeyed-input surface.
-var unkeyedHeaderCandidates = []string{"X-Forwarded-Host", "X-Forwarded-Scheme", "X-Original-URL", "X-Rewrite-URL"}
+// unkeyedInputMarker is the value injected via each candidate; its
+// unusual, invalid-looking form makes it safe to positively grep for in
+// arbitrary response bodies/headers without colliding with real content.
+const unkeyedInputMarker = "cache-detective-poison-marker.invalid"
+
+// unkeyedAxis describes one input surface (header, cookie, query
+// parameter) the unkeyed-input miner probes across its wordlist. Every
+// axis shares the same Param Miner methodology: apply the candidate
+// (carrying unkeyedInputMarker) to a cache-buster-isolated request, then
+// check whether an unmodified follow-up request against that same
+// isolated URL/header is served the marker back — proof the candidate
+// reaches the origin and affects the response but isn't part of the cache
+// key.
+type unkeyedAxis struct {
+	// Name identifies the input kind in finding titles/descriptions, e.g.
+	// "header", "cookie", "query parameter".
+	Name string
+	// Wordlist is the axis's bundled default candidate names.
+	Wordlist []string
+	// Apply returns the poison request's URL and extra headers for
+	// candidate given busterProbe, the cache-buster-isolated URL/header
+	// the poison and confirm requests share.
+	Apply func(candidate string, busterProbe checkbase.CacheBusterProbe) (string, http.Header)
+}
 
 func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harnessx.Resource, _ harnessx.ResultStore) (harnessx.Result, error) {
 	if !aggressiveGate(target) {
 		return harnessx.Result{}, nil
 	}
 	pctx := target.Data.(*checkbase.ProbeCtx)
-	marker := "cache-detective-poison-marker.invalid"
+
+	axes := []unkeyedAxis{
+		{
+			Name:     "header",
+			Wordlist: defaultHeaderWordlist,
+			Apply: func(candidate string, busterProbe checkbase.CacheBusterProbe) (string, http.Header) {
+				return busterProbe.URL, checkbase.MergeHeader(busterProbe.Header, http.Header{candidate: {unkeyedInputMarker}})
+			},
+		},
+		{
+			Name:     "cookie",
+			Wordlist: defaultCookieWordlist,
+			Apply: func(candidate string, busterProbe checkbase.CacheBusterProbe) (string, http.Header) {
+				cookieHeader := http.Header{"Cookie": {cookieHeaderValue(pctx.Cookies, candidate, unkeyedInputMarker)}}
+				return busterProbe.URL, checkbase.MergeHeader(busterProbe.Header, cookieHeader)
+			},
+		},
+		{
+			Name:     "query parameter",
+			Wordlist: defaultParamWordlist,
+			Apply: func(candidate string, busterProbe checkbase.CacheBusterProbe) (string, http.Header) {
+				return withExtraQueryParam(busterProbe.URL, candidate, unkeyedInputMarker), busterProbe.Header
+			},
+		},
+	}
 
 	budget := pctx.MaxAggressiveRequests
 	var obs []harnessx.Observation
-
-	for _, header := range unkeyedHeaderCandidates {
+	for _, axis := range axes {
 		if budget < 2 {
 			break
 		}
-		budget -= 2
+		obs = append(obs, mineUnkeyedAxis(ctx, pctx, resource, &budget, axis, pctx.UnkeyedInputWordlist)...)
+	}
 
-		// A fresh cache-buster token per header attempt: the poison and
+	return harnessx.Result{Observations: obs}, nil
+}
+
+// mineUnkeyedAxis walks axis's bundled wordlist (plus any caller-supplied
+// extraCandidates, deduplicated) applying its Param-Miner-style
+// poison/confirm probe to each candidate until budget runs out.
+func mineUnkeyedAxis(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, budget *int, axis unkeyedAxis, extraCandidates []string) []harnessx.Observation {
+	var obs []harnessx.Observation
+	for _, candidate := range dedupeCandidates(axis.Wordlist, extraCandidates) {
+		if *budget < 2 {
+			break
+		}
+		*budget -= 2
+
+		// A fresh cache-buster token per candidate attempt: the poison and
 		// confirm requests below share it, so they land on the same
 		// isolated cache entry instead of the resource's real, canonical
 		// one — see CacheBusterConfig.
@@ -92,7 +150,8 @@ func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harn
 			continue
 		}
 
-		poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{header: {marker}}))
+		poisonURL, poisonHeader := axis.Apply(candidate, busterProbe)
+		poisonReq, err := checkbase.NewRequest(ctx, poisonURL, pctx, poisonHeader)
 		if err != nil {
 			continue
 		}
@@ -100,9 +159,9 @@ func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harn
 		if err != nil {
 			continue
 		}
-		if !strings.Contains(string(poisoned.Body), marker) && !containsHeaderValue(poisoned.Header, marker) {
+		if !strings.Contains(string(poisoned.Body), unkeyedInputMarker) && !containsHeaderValue(poisoned.Header, unkeyedInputMarker) {
 			// The marker wasn't even reflected into this response — no
-			// injection surface via this header, skip the confirmation
+			// injection surface via this candidate, skip the confirmation
 			// request.
 			continue
 		}
@@ -116,19 +175,68 @@ func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harn
 			continue
 		}
 
-		if strings.Contains(string(confirm.Body), marker) || containsHeaderValue(confirm.Header, marker) {
+		if strings.Contains(string(confirm.Body), unkeyedInputMarker) || containsHeaderValue(confirm.Header, unkeyedInputMarker) {
 			obs = append(obs, harnessx.Observation{
 				CheckID:     checkbase.CheckIDUnkeyedHeader,
 				ResourceID:  resource.ID,
-				Title:       fmt.Sprintf("Unkeyed header injection via %s", header),
-				Description: fmt.Sprintf("a marker injected via the %s request header was reflected into the response and then served, unmodified, to a follow-up plain request — the header is not part of the cache key", header),
-				Evidence:    fmt.Sprintf("injected %s: %s", header, marker),
+				Title:       fmt.Sprintf("Unkeyed %s injection via %s", axis.Name, candidate),
+				Description: fmt.Sprintf("a marker injected via the %s %q was reflected into the response and then served, unmodified, to a follow-up plain request — %s is not part of the cache key", axis.Name, candidate, candidate),
+				Evidence:    fmt.Sprintf("injected %s %s: %s", axis.Name, candidate, unkeyedInputMarker),
 				Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityCritical},
 			})
 		}
 	}
 
-	return harnessx.Result{Observations: obs}, nil
+	return obs
+}
+
+// dedupeCandidates merges wordlist and extra, preserving order and
+// dropping repeats — extra (a user-supplied custom wordlist) is applied
+// to every axis, so it commonly repeats an axis's own bundled entries.
+func dedupeCandidates(wordlist, extra []string) []string {
+	out := make([]string, 0, len(wordlist)+len(extra))
+	seen := make(map[string]bool, len(wordlist)+len(extra))
+	for _, c := range wordlist {
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		out = append(out, c)
+	}
+	for _, c := range extra {
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		out = append(out, c)
+	}
+	return out
+}
+
+// cookieHeaderValue builds a Cookie request-header value carrying every
+// one of existing's cookies plus name=value, so a cookie-candidate probe
+// doesn't drop the caller's configured session/auth cookies.
+func cookieHeaderValue(existing []checkbase.Cookie, name, value string) string {
+	parts := make([]string, 0, len(existing)+1)
+	for _, c := range existing {
+		parts = append(parts, c.Name+"="+c.Value)
+	}
+	parts = append(parts, name+"="+value)
+	return strings.Join(parts, "; ")
+}
+
+// withExtraQueryParam returns rawURL with key=value set on its query
+// string, preserving every existing query parameter (including a
+// cache-buster token already applied by NewCacheBusterProbe).
+func withExtraQueryParam(rawURL, key, value string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set(key, value)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func containsHeaderValue(h http.Header, marker string) bool {

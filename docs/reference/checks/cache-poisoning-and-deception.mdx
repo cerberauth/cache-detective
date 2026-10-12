@@ -13,15 +13,25 @@ import { Aside } from '@/components/docs';
 
 ## Cache-buster isolation
 
-Unkeyed header injection, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../../cli/scan/#cache-buster-isolation).
+Unkeyed input mining, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../../cli/scan/#cache-buster-isolation).
 
-## Unkeyed header injection
+## Unkeyed input mining
 
-Injects a marker into headers commonly reflected but left unkeyed by CDNs (`X-Forwarded-Host`, `X-Forwarded-Scheme`, `X-Original-URL`, `X-Rewrite-URL`), then sends a follow-up plain request to check whether it receives the poisoned response back — the classic [web cache poisoning](https://portswigger.net/web-security/web-cache-poisoning) technique.
+Wordlist-driven mining across three input surfaces — headers, cookies, and query parameters — for candidates a fronting cache leaves out of its cache key: injects a marker via each candidate (isolated behind a fresh cache-buster token) and sends a follow-up plain request to the same isolated URL/header to check whether it receives the poisoned response back. This is the classic [web cache poisoning](https://portswigger.net/web-security/web-cache-poisoning) precondition — Kettle's ["Practical Web Cache Poisoning"](https://portswigger.net/research/practical-web-cache-poisoning) (2018) and the Param Miner discovery methodology.
+
+Each surface mines its own bundled default wordlist, in this order:
+
+- **Headers** — `X-Forwarded-Host`, `X-Forwarded-Scheme`, `X-Forwarded-Proto`, `X-Forwarded-Server`, `X-Host`, `X-Original-URL`, `X-Rewrite-URL`
+- **Cookies** — `debug`, `beta`, `preview`, `test`, `lang`, `language`, `locale`, `region`, `country`, `currency`, `theme`, `mobile`
+- **Query parameters** — `debug`, `test`, `preview`, `callback`, `jsonp`, `redirect`, `return_url`, `next`, `utm_source`, `utm_campaign`, `ref`, `lang`, `locale`
+
+[`scan`'s `--unkeyed-wordlist`](../../cli/scan/#unkeyed-input-mining-wordlist) supplements every surface's bundled list with app-specific candidate names of your own. `--max-aggressive-requests` is shared across all three surfaces (headers exhausted before cookies before query parameters), so mining deep into the bundled — let alone a custom — wordlist may need raising it well past its default of `10`.
 
 | Finding | Severity | CWE |
 |---|---|---|
 | Unkeyed header injection via `<header>` | critical | CWE-444 |
+| Unkeyed cookie injection via `<cookie>` | critical | CWE-444 |
+| Unkeyed query parameter injection via `<param>` | critical | CWE-444 |
 
 ## Cache deception
 

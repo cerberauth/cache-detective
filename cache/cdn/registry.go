@@ -21,6 +21,25 @@ const (
 	StateUnknown State = "UNKNOWN"
 )
 
+// NormalizationOrder is whether a cache normalizes the request path (collapses
+// dot-segments, decodes encoded separators) before or after it applies its
+// cache rules and builds the cache key. A cache that normalizes *before* keys
+// "/x/../account" the same as "/account"; one that normalizes *after* (or never)
+// keys the verbatim detour path, so the origin's response for it is stored
+// under an attacker-chosen URL.
+type NormalizationOrder string
+
+const (
+	// NormalizationUnknown means the order is undocumented or wasn't observed.
+	NormalizationUnknown NormalizationOrder = ""
+	// NormalizesBeforeRules means the cache normalizes the path first, so a
+	// detour path and its canonical form share one cache entry.
+	NormalizesBeforeRules NormalizationOrder = "before"
+	// NormalizesAfterRules means the cache applies its rules (and keys) on the
+	// verbatim path, so a detour path gets its own cache entry.
+	NormalizesAfterRules NormalizationOrder = "after"
+)
+
 // Header/value literals shared by more than one Registry entry, pulled out
 // as constants rather than repeated inline.
 const (
@@ -93,6 +112,14 @@ type Signature struct {
 	// HIT/MISS, not something Detect matches against.
 	KeyNormalization string
 
+	// PathNormalization documents whether this CDN normalizes the request path
+	// (dot-segments, percent-encoded separators) before applying its cache
+	// rules and building the cache key, per Doyhenard, "Gotta cache 'em all"
+	// (Black Hat USA 2024). NormalizationUnknown when undocumented. The
+	// delimiter mapper (§5) measures this live and uses the documented value
+	// only as a cross-check, since a customer's rule set can override it.
+	PathNormalization NormalizationOrder
+
 	// Quirks lists known, disclosed CDN-specific caching behaviors, CVEs, or
 	// incidents relevant to cache-poisoning/deception risk assessment (see
 	// Quirk) — kept as data so a newly disclosed issue is a Registry edit,
@@ -132,11 +159,12 @@ var Registry = []Signature{
 			"revalidated": StateHit,
 			"updating":    StateStale,
 		},
-		AgeHeader:        ageHeader,
-		ServerMatch:      []string{"cloudflare"},
-		ApexDomains:      []string{"cloudflare.net"},
-		StaticExtensions: append(commonStaticExtensions, ".webp", ".pdf", ".mp4", ".zip"),
-		KeyNormalization: "Default cache key is scheme+host+path; the query string is included verbatim (not reordered) unless a Cache Rules \"Custom Key\" strips/reorders it. Cacheability is decided first by file extension (see StaticExtensions), then by origin Cache-Control — an extensionless/HTML response isn't cached by default regardless of Cache-Control.",
+		AgeHeader:         ageHeader,
+		ServerMatch:       []string{"cloudflare"},
+		ApexDomains:       []string{"cloudflare.net"},
+		StaticExtensions:  append(commonStaticExtensions, ".webp", ".pdf", ".mp4", ".zip"),
+		PathNormalization: NormalizesAfterRules,
+		KeyNormalization:  "Default cache key is scheme+host+path; the query string is included verbatim (not reordered) unless a Cache Rules \"Custom Key\" strips/reorders it. Cacheability is decided first by file extension (see StaticExtensions), then by origin Cache-Control — an extensionless/HTML response isn't cached by default regardless of Cache-Control.",
 		Quirks: []Quirk{
 			cpdosQuirk,
 			{
@@ -154,14 +182,15 @@ var Registry = []Signature{
 			missValue: StateMiss,
 			"pass":    StateBypass,
 		},
-		AgeHeader:        ageHeader,
-		ServerMatch:      []string{"fastly"},
-		ViaMatch:         []string{"varnish"},
-		ApexDomains:      []string{"fastly.net", "fastlylb.net"},
-		MultiTierHeaders: []string{"X-Served-By", "X-Cache-Hits"},
-		StaticExtensions: commonStaticExtensions,
-		KeyNormalization: "VCL-defined: the default Fastly Varnish Configuration Language (VCL) hashes scheme+host+path and, unless overridden, the full query string (unordered, i.e. present verbatim) — most production configs add explicit vcl_hash logic to strip tracking params or normalize delimiters before hashing, so behavior varies per service.",
-		Quirks:           []Quirk{cpdosQuirk},
+		AgeHeader:         ageHeader,
+		ServerMatch:       []string{"fastly"},
+		ViaMatch:          []string{"varnish"},
+		ApexDomains:       []string{"fastly.net", "fastlylb.net"},
+		MultiTierHeaders:  []string{"X-Served-By", "X-Cache-Hits"},
+		StaticExtensions:  commonStaticExtensions,
+		PathNormalization: NormalizesAfterRules,
+		KeyNormalization:  "VCL-defined: the default Fastly Varnish Configuration Language (VCL) hashes scheme+host+path and, unless overridden, the full query string (unordered, i.e. present verbatim) — most production configs add explicit vcl_hash logic to strip tracking params or normalize delimiters before hashing, so behavior varies per service.",
+		Quirks:            []Quirk{cpdosQuirk},
 	},
 	{
 		Name:              "Akamai",
@@ -191,12 +220,13 @@ var Registry = []Signature{
 			"redirecthit from cloudfront":   StateHit,
 			"limitexceeded from cloudfront": StateBypass,
 		},
-		AgeHeader:        ageHeader,
-		ViaMatch:         []string{"cloudfront"},
-		ApexDomains:      []string{"cloudfront.net"},
-		StaticExtensions: commonStaticExtensions,
-		KeyNormalization: "Cache key is set per distribution by a cache policy: the managed \"CachingOptimized\" policy keys on host+path only (query strings, headers, and cookies all excluded by default); a custom policy can add specific query params (allowlist, sorted) or headers/cookies to the key.",
-		Quirks:           []Quirk{cpdosQuirk},
+		AgeHeader:         ageHeader,
+		ViaMatch:          []string{"cloudfront"},
+		ApexDomains:       []string{"cloudfront.net"},
+		StaticExtensions:  commonStaticExtensions,
+		PathNormalization: NormalizesBeforeRules,
+		KeyNormalization:  "Cache key is set per distribution by a cache policy: the managed \"CachingOptimized\" policy keys on host+path only (query strings, headers, and cookies all excluded by default); a custom policy can add specific query params (allowlist, sorted) or headers/cookies to the key.",
+		Quirks:            []Quirk{cpdosQuirk},
 	},
 	{
 		Name:              "Varnish",
@@ -256,6 +286,7 @@ var Registry = []Signature{
 		ServerMatch:       []string{"google frontend"},
 		ViaMatch:          []string{"google"},
 		StaticExtensions:  commonStaticExtensions,
+		PathNormalization: NormalizesAfterRules,
 		KeyNormalization:  "Cache key composition (host, path, query-string inclusion, protocol) is configured per backend service's CacheKeyPolicy; the default policy includes the full host, path, and query string verbatim.",
 	},
 	{
@@ -267,10 +298,11 @@ var Registry = []Signature{
 			"tcp_remote_hit": StateHit,
 			"config_nocache": StateBypass,
 		},
-		AgeHeader:        ageHeader,
-		ApexDomains:      []string{"azurefd.net", "azureedge.net"},
-		StaticExtensions: commonStaticExtensions,
-		KeyNormalization: "Cache key defaults to scheme+host+path+query string verbatim; caching duration/query-string handling (include all, ignore, or a specific allowlist) is set per route in the \"Caching\" rule set.",
+		AgeHeader:         ageHeader,
+		ApexDomains:       []string{"azurefd.net", "azureedge.net"},
+		StaticExtensions:  commonStaticExtensions,
+		PathNormalization: NormalizesBeforeRules,
+		KeyNormalization:  "Cache key defaults to scheme+host+path+query string verbatim; caching duration/query-string handling (include all, ignore, or a specific allowlist) is set per route in the \"Caching\" rule set.",
 	},
 	{
 		Name:              "Nginx",
@@ -333,6 +365,17 @@ var cpdosQuirk = Quirk{
 // about additional/private CDN deployments.
 func Register(sig Signature) {
 	Registry = append(Registry, sig)
+}
+
+// ByName returns the Registry Signature named name (case-insensitive), or false
+// if none matches — for looking up a detected CDN's documented behavior.
+func ByName(name string) (Signature, bool) {
+	for _, sig := range Registry {
+		if strings.EqualFold(sig.Name, name) {
+			return sig, true
+		}
+	}
+	return Signature{}, false
 }
 
 // MatchServer returns the first Signature whose ServerMatch or ViaMatch

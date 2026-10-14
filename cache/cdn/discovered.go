@@ -3,24 +3,30 @@ package cdn
 import "sync"
 
 // DelimiterDiscrepancy records one character the delimiter mapper (§5)
-// found the origin treats as a path delimiter — truncating its route there
-// and serving the undelimited resource — while a fronting cache keys on the
-// verbatim request path. That split is the foundation of both cache-key
-// poisoning and cache deception: the cache stores the origin's real
-// (possibly authenticated) response under a distinct, attacker-chosen URL.
+// found origin and cache disagree on as a path delimiter. In the origin-only
+// direction the origin truncates its route there and serves the undelimited
+// resource while a fronting cache keys on the verbatim request path: the cache
+// stores the origin's real (possibly authenticated) response under a distinct,
+// attacker-chosen URL (cache deception). In the cache-only direction the cache
+// truncates its key at the character while the origin routes on the full path:
+// a response the origin returns for the delimited URL is stored under — and
+// replayed for — the undelimited resource's key (cache poisoning).
 type DelimiterDiscrepancy struct {
 	// Delimiter is the inserted character sequence, as it was sent on the
 	// wire (e.g. ";", "$", or the literal percent-encoding "%00").
 	Delimiter string
 	// OriginOnly is true when the origin truncated its route at Delimiter
-	// (the baseline/suffix/insert probe's R2 == R0) — the discrepancy this
-	// store exists to record. Always true for a recorded entry today; the
-	// field is explicit so a future reverse-direction finding (cache-only
-	// delimiter) has a home.
+	// (the baseline/suffix/insert probe's R2 == R0) while the cache did not.
 	OriginOnly bool
+	// CacheOnly is true for the reverse direction: the cache truncated its key
+	// at Delimiter (a response fetched through the delimited URL was replayed
+	// for the undelimited one) while the origin routed on the full path.
+	// Exactly one of OriginOnly/CacheOnly is set on a recorded entry.
+	CacheOnly bool
 	// Cacheable is true when the response served through the delimiter looked
 	// cacheable (RFC 9111) — i.e. the discrepancy is a live cache-deception
-	// surface, not just a routing curiosity.
+	// surface, not just a routing curiosity. Always true for a CacheOnly entry,
+	// which is only recorded after the cache was observed storing the response.
 	Cacheable bool
 }
 
@@ -42,6 +48,14 @@ type TargetQuirks struct {
 	// OriginNormalizesTraversal is the same, for a plain unencoded "../"
 	// dot-segment.
 	OriginNormalizesTraversal *bool
+	// CacheEncodedTraversal is the measured order in which the fronting cache
+	// normalizes an encoded dot-segment ("..%2f") relative to applying its
+	// cache rules and building the key — NormalizationUnknown when the probe
+	// didn't run or couldn't observe the cache (no HIT signal, resource not
+	// cached). Only probed where the origin itself normalizes the form.
+	CacheEncodedTraversal NormalizationOrder
+	// CacheTraversal is the same, for a plain unencoded "../" dot-segment.
+	CacheTraversal NormalizationOrder
 }
 
 // DiscoveredQuirks is the process-wide store of per-origin delimiter and
@@ -82,7 +96,7 @@ func (s *QuirkStore) Record(q TargetQuirks) {
 		s.m[q.Origin] = entry
 	}
 	for _, d := range q.Delimiters {
-		if !containsDelimiter(entry.Delimiters, d.Delimiter) {
+		if !containsDelimiter(entry.Delimiters, d) {
 			entry.Delimiters = append(entry.Delimiters, d)
 		}
 	}
@@ -93,6 +107,12 @@ func (s *QuirkStore) Record(q TargetQuirks) {
 	if q.OriginNormalizesTraversal != nil {
 		v := *q.OriginNormalizesTraversal
 		entry.OriginNormalizesTraversal = &v
+	}
+	if q.CacheEncodedTraversal != NormalizationUnknown {
+		entry.CacheEncodedTraversal = q.CacheEncodedTraversal
+	}
+	if q.CacheTraversal != NormalizationUnknown {
+		entry.CacheTraversal = q.CacheTraversal
 	}
 }
 
@@ -107,7 +127,11 @@ func (s *QuirkStore) Lookup(origin string) (TargetQuirks, bool) {
 	if !ok {
 		return TargetQuirks{}, false
 	}
-	out := TargetQuirks{Origin: entry.Origin}
+	out := TargetQuirks{
+		Origin:                entry.Origin,
+		CacheEncodedTraversal: entry.CacheEncodedTraversal,
+		CacheTraversal:        entry.CacheTraversal,
+	}
 	if len(entry.Delimiters) > 0 {
 		out.Delimiters = append([]DelimiterDiscrepancy(nil), entry.Delimiters...)
 	}
@@ -122,9 +146,12 @@ func (s *QuirkStore) Lookup(origin string) (TargetQuirks, bool) {
 	return out, true
 }
 
-func containsDelimiter(list []DelimiterDiscrepancy, delim string) bool {
+// containsDelimiter reports whether list already holds an entry for the same
+// delimiter in the same direction (a character can be origin-only on one route
+// and cache-only on another).
+func containsDelimiter(list []DelimiterDiscrepancy, delim DelimiterDiscrepancy) bool {
 	for _, d := range list {
-		if d.Delimiter == delim {
+		if d.Delimiter == delim.Delimiter && d.CacheOnly == delim.CacheOnly {
 			return true
 		}
 	}

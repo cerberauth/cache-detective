@@ -233,6 +233,13 @@ jobs:
           check "/me" "--requests 1 --aggressive --bearer fixture-token" "Cache deception via static-directory path traversal"
           check "/me" "--requests 1 --aggressive --bearer fixture-token" "Cache deception via nested-encoded static-directory path traversal"
           check "/cacheable" "--requests 1 --aggressive" "Cache-key path collision via path traversal"
+          # The delimiter & normalization mapper spends 10 requests on its
+          # origin-side sweep, then up to 6 on the cache-side normalization
+          # order and 2 per candidate on cache-only delimiters, so these need
+          # a budget well above the default.
+          check "/delim-origin" "--requests 1 --aggressive --max-aggressive-requests 30" "Origin-only path delimiter"
+          check "/delim-cache" "--requests 1 --aggressive --max-aggressive-requests 30" "Cache-only path delimiter"
+          check "/norm-order" "--requests 1 --aggressive --max-aggressive-requests 30" "Cache keys encoded"
           # The key-explosion check needs at least 21 requests (20 distinct
           # values plus a repeat) to tell "no cap" from "a cap above the sample".
           check "/explode?q=test" "--requests 1 --aggressive --max-aggressive-requests 30" "Unbounded cache-key cardinality"

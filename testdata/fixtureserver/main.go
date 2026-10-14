@@ -164,7 +164,12 @@ func main() {
 	// /me: the authenticated resource the /static/ traversal fixtures resolve
 	// to (cache-deception-static-directory); by its own path it is private.
 	mux.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) { raw.serveMe(w, r, false) })
+	pathMapping := newPathMappingFixtures(*vulnerable)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h, ok := pathMapping.handles(r); ok {
+			h(w, r)
+			return
+		}
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/static/"):
 			raw.staticDir(w, r)

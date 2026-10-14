@@ -24,7 +24,7 @@ var defaultCookieWordlist = []string{
 	"beta",
 	"preview",
 	"test",
-	"lang",
+	langParam,
 	"language",
 	"locale",
 	"region",
@@ -50,6 +50,6 @@ var defaultParamWordlist = []string{
 	"utm_source",
 	"utm_campaign",
 	"ref",
-	"lang",
+	langParam,
 	"locale",
 }

@@ -276,7 +276,7 @@ func init() {
 	scanCmd.Flags().DurationVar(&scanTimeout, "timeout", 15*time.Second, "Per-request timeout")
 	scanCmd.Flags().DurationVar(&scanStaleWindowWait, "stale-window-max-wait", 30*time.Second, "Maximum time to wait for a resource to enter its declared stale-while-revalidate window before giving up on actively confirming it")
 	scanCmd.Flags().BoolVar(&scanAggressive, "aggressive", false, "Enable cache poisoning/deception probing (§5) — opt-in since it intentionally probes for exploitable cache behavior")
-	scanCmd.Flags().IntVar(&scanMaxAggressive, "max-aggressive-requests", 10, "Hard cap on extra probe requests per resource for --aggressive checks (and the read-only vary-key check)")
+	scanCmd.Flags().IntVar(&scanMaxAggressive, "max-aggressive-requests", 10, "Hard cap on extra probe requests per resource for --aggressive checks (and the read-only vary-key check); the cache-key-explosion check needs at least 21")
 	scanCmd.Flags().StringVar(&scanCacheBusterMode, "cache-buster-mode", "query", "How --aggressive checks isolate poison/confirm requests from the resource's real cache entry: \"query\", \"header\", or \"both\"")
 	scanCmd.Flags().StringVar(&scanCacheBusterParam, "cache-buster-param", "cd_cachebuster", "Query parameter name used in \"query\"/\"both\" cache-buster mode")
 	scanCmd.Flags().StringVar(&scanCacheBusterHeader, "cache-buster-header", "X-Cache-Detective-Buster", "Request header name used in \"header\"/\"both\" cache-buster mode")

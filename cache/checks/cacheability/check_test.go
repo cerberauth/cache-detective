@@ -25,7 +25,7 @@ func runChecks(t *testing.T, pctx *checkbase.ProbeCtx, target string) harnessx.S
 	require.NoError(t, engine.Register(
 		checkbase.DiscoveryCheck,
 		security.UnkeyedHeaderCheck, security.CacheDeceptionCheck, security.ErrorCachingCheck, security.ResponseSplittingCheck, security.CPDoSCheck,
-		cacheability.Check, cacheability.AuthCheck,
+		cacheability.Check, cacheability.AuthCheck, cacheability.SessionCheck,
 	))
 
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: target}}
@@ -147,6 +147,112 @@ func TestCheck_AuthenticatedPrivateNotFlagged(t *testing.T) {
 	res, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
 	require.True(t, ok)
 	assert.Empty(t, res.Observations)
+}
+
+func TestCheck_CacheableSetCookieFlagsSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "live-session-value", HttpOnly: true})
+		_, _ = w.Write([]byte("dashboard"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New()}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDSessionCacheable, "root")
+	require.True(t, ok)
+	require.Len(t, res.Observations, 1)
+	assert.Equal(t, "Cacheable response sets a cookie", res.Observations[0].Title)
+	assert.Equal(t, checkbase.SeverityHigh, res.Observations[0].Metadata[checkbase.SeverityKey], "a session-looking cookie name escalates past the base severity")
+	assert.Contains(t, res.Observations[0].Evidence, "session")
+	assert.NotContains(t, res.Observations[0].Evidence, "live-session-value", "the cookie value must never be echoed into a report")
+}
+
+func TestCheck_CacheableSetCookieWithTokenBodyIsCritical(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+		_, _ = w.Write([]byte(`{"user": "u1", "csrf_token": "tok-123"}`))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New()}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDSessionCacheable, "root")
+	require.True(t, ok)
+	require.Len(t, res.Observations, 1)
+	assert.Equal(t, checkbase.SeverityCritical, res.Observations[0].Metadata[checkbase.SeverityKey])
+}
+
+func TestCheck_NonSessionCookieIsMediumSeverity(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "lang", Value: "en"})
+		_, _ = w.Write([]byte("page"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New()}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDSessionCacheable, "root")
+	require.True(t, ok)
+	require.Len(t, res.Observations, 1)
+	assert.Equal(t, checkbase.SeverityMedium, res.Observations[0].Metadata[checkbase.SeverityKey])
+}
+
+func TestCheck_SetCookieNotCacheableNotFlagged(t *testing.T) {
+	for name, cc := range map[string]string{"private": "private", "no-store": "no-store"} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", cc)
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+				_, _ = w.Write([]byte("dashboard"))
+			}))
+			defer srv.Close()
+
+			pctx := (&checkbase.ProbeCtx{Probe: probe.New()}).WithDefaults()
+			summary := runChecks(t, &pctx, srv.URL)
+
+			res, ok := findResult(summary, checkbase.CheckIDSessionCacheable, "root")
+			require.True(t, ok)
+			assert.Empty(t, res.Observations)
+		})
+	}
+}
+
+func TestCheck_NoCookieNotFlaggedBySession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("page"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New()}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	res, ok := findResult(summary, checkbase.CheckIDSessionCacheable, "root")
+	require.True(t, ok)
+	assert.Empty(t, res.Observations)
+}
+
+// TestCheck_AuthenticatedSetCookieReportedOnlyByAuthCheck: AuthCheck already
+// reports (and escalates on) an authenticated cacheable response carrying
+// Set-Cookie; a second finding for the same defect would be noise.
+func TestCheck_AuthenticatedSetCookieReportedOnlyByAuthCheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+		_, _ = w.Write([]byte("dashboard"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), BearerToken: "secret-token"}).WithDefaults()
+	summary := runChecks(t, &pctx, srv.URL)
+
+	auth, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
+	require.True(t, ok)
+	assert.Len(t, auth.Observations, 1)
+	session, ok := findResult(summary, checkbase.CheckIDSessionCacheable, "root")
+	require.True(t, ok)
+	assert.Empty(t, session.Observations)
 }
 
 func serverOrigin(t *testing.T, rawURL string) string {

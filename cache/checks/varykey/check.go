@@ -143,7 +143,80 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 	}
 
 	obs := findingsFrom(res, resource.ID)
+	obs = append(obs, credentialLeakFindings(ctx, pctx, resource, base, &budget)...)
 	return harnessx.Result{Data: res, Observations: obs}, nil
+}
+
+// credentialLeakFindings checks the cache-key input the Vary probes above
+// can't: the caller's own credentials. Authorization (and Cookie) are never
+// "varied" there, since a cache that ignores them doesn't change the
+// response for a different *valid* value — it hands the first caller's
+// response to anyone, including a caller with no credentials at all.
+//
+// So: repeat the request with Authorization/Cookie stripped. If that comes
+// back byte-identical to the authenticated response, either the content is
+// public (origin ignores credentials) or a cache replayed it. A second
+// stripped request against a cache-buster-isolated URL, which no cache entry
+// can answer, tells the two apart: it only matches again when the origin
+// really does serve this content to anyone.
+func credentialLeakFindings(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, base checkbase.Exchange, budget *int) []harnessx.Observation {
+	if *budget < 2 || base.StatusCode/100 != 2 || len(base.Body) == 0 {
+		return nil
+	}
+	probeReq, err := checkbase.NewRequest(ctx, resource.URL, pctx, nil)
+	if err != nil || (probeReq.Header.Get("Authorization") == "" && probeReq.Header.Get("Cookie") == "") {
+		return nil
+	}
+
+	*budget--
+	anon, err := anonymousExchange(ctx, pctx, resource.URL, nil)
+	if err != nil || anon.StatusCode != base.StatusCode || string(anon.Body) != string(base.Body) {
+		return nil
+	}
+
+	buster, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+	if err != nil {
+		return nil
+	}
+	*budget--
+	isolated, err := anonymousExchange(ctx, pctx, buster.URL, buster.Header)
+	if err != nil {
+		return nil
+	}
+
+	finding := func(severity, description string) []harnessx.Observation {
+		return []harnessx.Observation{{
+			CheckID:     checkbase.CheckIDVaryKey,
+			ResourceID:  resource.ID,
+			Title:       "Authenticated response served to unauthenticated request",
+			Description: description,
+			Evidence:    fmt.Sprintf("status=%d, %d-byte body identical with and without credentials; cache state on the credential-less request: %s", anon.StatusCode, len(anon.Body), cdn.Detect(anon.Header).State),
+			Metadata:    map[string]string{checkbase.SeverityKey: severity},
+		}}
+	}
+
+	switch {
+	case isolated.StatusCode != anon.StatusCode || string(isolated.Body) != string(anon.Body):
+		return finding(checkbase.SeverityCritical, "a request with no Authorization/Cookie received the authenticated response, but the same credential-less request against a cache-buster-isolated URL did not — the origin withholds this content from anonymous callers and a cache in front of it replayed it anyway, so credentials aren't part of its cache key")
+	case cdn.Detect(anon.Header).State == cdn.StateHit && cdn.Detect(isolated.Header).State == cdn.StateHit:
+		return finding(checkbase.SeverityHigh, "a request with no Authorization/Cookie was served the authenticated response from cache (HIT). The cache-buster-isolated request was a HIT too, so the cache ignores the query string and the origin's behavior for anonymous callers couldn't be observed in isolation — treat as a probable credential-less cache hit, and confirm the content is meant to be public")
+	}
+	return nil
+}
+
+// anonymousExchange issues a request built like every other probe, minus the
+// Authorization and Cookie headers. Other configured headers are kept: with
+// no way to tell which are credentials, only the two standard ones are
+// stripped, which under-reports (never over-reports) for custom API-key
+// headers.
+func anonymousExchange(ctx context.Context, pctx *checkbase.ProbeCtx, url string, extra http.Header) (checkbase.Exchange, error) {
+	req, err := checkbase.NewRequest(ctx, url, pctx, extra)
+	if err != nil {
+		return checkbase.Exchange{}, err
+	}
+	req.Header.Del("Authorization")
+	req.Header.Del("Cookie")
+	return checkbase.Do(ctx, pctx, req)
 }
 
 func findingsFrom(res Result, resourceID string) []harnessx.Observation {

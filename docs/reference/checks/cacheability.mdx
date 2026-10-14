@@ -26,6 +26,7 @@ Analyzes a single response's headers to determine whether it's cacheable per [RF
 | Legacy Pragma fallback in use | info | Caching relies solely on `Pragma: no-cache`, no `Cache-Control` present |
 | Cacheable response missing validators | low | Cacheable, but neither `ETag` nor `Last-Modified` is present |
 | **Authenticated response marked cacheable** | **high**, escalated to **critical** when the body/headers carry PII, tokens, or `Set-Cookie` | The request carried a bearer token or cookies (`--bearer`/`--cookie`) and the response is cacheable by a shared cache without an [RFC 9111 §3.5](https://www.rfc-editor.org/rfc/rfc9111#section-3.5) opt-in directive — see below |
+| **Cacheable response sets a cookie** | **medium**, **high** for a session-looking cookie name, **critical** when the body also carries a token/credential field | The response is cacheable, sets a cookie, and has neither `private` nor `no-store` — and the request carried no credentials, so it isn't the authenticated finding above. See below |
 
 ## Authenticated response marked cacheable
 
@@ -39,3 +40,9 @@ This is the one security-relevant finding in this area, and it's reported as its
 A shared cache/CDN sitting in front of the origin may then store and serve that authenticated response to a different user.
 
 The finding's base severity is `high`. It's escalated to `critical` (in `Observation.Metadata["severity"]`, and hence in each output format's per-finding metadata — see [`--output-format`](../../cli/scan/)) when the response body or headers actually carry something concretely sensitive: an email address, a JWT, a `credit_card`/`api_key`/`password`/... field, a credit-card-shaped number, an SSN, or a `Set-Cookie` header. This distinguishes a theoretical misconfiguration from one that's already leaking real user data if a shared cache stores it.
+
+## Cacheable response sets a cookie
+
+The unauthenticated counterpart of the finding above. A login page, dashboard or landing page that mints a session or CSRF cookie per visitor is still dangerous when cached: a shared cache that stores it replays the first visitor's `Set-Cookie` — and any session-bound token in the body — to everyone after.
+
+Severity starts at **medium**, rises to **high** when a cookie name looks like it carries a session or secret (`sess`, `sid`, `auth`, `token`, `jwt`, `csrf`, `xsrf`, `login`, `remember`), and to **critical** when the body also carries a token or credential field (a JWT, `csrf_token`, `session_id`, `access_token`, ...). Only cookie *names* appear in the evidence, never their values. A response that is already reported as an authenticated-cacheable violation isn't reported a second time.

@@ -37,6 +37,7 @@ Issues `--requests` probe requests (default `3`, spaced by `--interval`) per res
 | No explicit cache-status header | info | No known CDN header gave a verdict; the reported state (if any) is inferred from timing/Age |
 | Cacheable response is not actually being cached | low | The response declares itself cacheable, but every sample MISSed |
 | Non-cacheable response is being served from cache | medium | The response isn't supposed to be cacheable, but at least one sample HIT — usually a CDN/edge config drifted from the origin's headers |
+| Response with a non-cacheable status is being served from cache | medium | The status (e.g. `500`, `503`) has no default cache semantics under [RFC 9110 §15.1](https://www.rfc-editor.org/rfc/rfc9110#section-15.1) and the response has no `Cache-Control`/`Expires`, yet a sample HIT — the cache is inventing a heuristic lifetime, so a transient origin failure can be replayed after the origin recovers |
 
 ## Multi-request patterns
 

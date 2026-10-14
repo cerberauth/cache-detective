@@ -58,3 +58,23 @@ func TestScanAll_Aggressive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, summary.Failed)
 }
+
+// TestBuildChecks_EveryCheckHasADef guards the two parallel lists in
+// BuildChecks: a check registered without a CheckDef (or a Def with no check)
+// would drop out of reports' CVSS/CWE enrichment without any other test
+// noticing.
+func TestBuildChecks_EveryCheckHasADef(t *testing.T) {
+	checks, defs := cache.BuildChecks()
+
+	registered := map[harnessx.CheckID]bool{}
+	for _, c := range checks {
+		registered[c.ID] = true
+		if c.ID == checkbase.CheckIDDiscovery {
+			continue // global seeding check, not a reportable one
+		}
+		assert.Contains(t, defs, c.ID, "check %q has no CheckDef", c.ID)
+	}
+	for id := range defs {
+		assert.True(t, registered[id], "CheckDef %q has no registered check", id)
+	}
+}

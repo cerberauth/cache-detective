@@ -13,7 +13,7 @@ import { Aside } from '@/components/docs';
 
 ## Cache-buster isolation
 
-Unkeyed input mining, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../../cli/scan/#cache-buster-isolation).
+Unkeyed input mining, web cache entanglement, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../../cli/scan/#cache-buster-isolation).
 
 ## Unkeyed input mining
 
@@ -33,15 +33,89 @@ Each surface mines its own bundled default wordlist, in this order:
 | Unkeyed cookie injection via `<cookie>` | critical | CWE-444 |
 | Unkeyed query parameter injection via `<param>` | critical | CWE-444 |
 
+## Web cache entanglement (fat GET & parameter cloaking)
+
+Two more ways an origin can read an input the cache key ignores, both from Kettle's ["Web Cache Entanglement: Novel Pathways to Poisoning"](https://portswigger.net/research/web-cache-entanglement) (Black Hat USA 2020). Both use the same marker-and-confirm method as unkeyed input mining, on a cache-buster-isolated URL.
+
+- **Fat GET** — a `GET` request carrying a body. Caches key on the URL and don't expect a GET body to change the response, but some origins still let it override a query parameter. The marker is sent as a raw body, then as form-encoded and JSON bodies keyed by the resource's own query parameter names (or `q` when it has none). Skipped when the scan method isn't `GET`, since a body is ordinary there.
+- **Parameter cloaking** — `;<name>=<marker>` appended to the query string. A cache that stops reading the query at the first `;` keys the request like the plain URL, while an origin that treats `;` as a parameter separator (Rails, some Java stacks) still reads the cloaked parameter. Candidate names are the resource's own query parameters, then `name`, `q`, `search`, `query`, `callback`, `redirect`, `url`, `lang`, plus any [`--unkeyed-wordlist`](../../cli/scan/#unkeyed-input-mining-wordlist) entries.
+
+This check has its own `--max-aggressive-requests` budget (it isn't shared with unkeyed input mining), so both techniques run within the default of `10`: fat GET first, then cloaking.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Cache poisoning via fat GET request body | critical | CWE-436 |
+| Cache poisoning via parameter cloaking (`<name>`) | critical | CWE-436 |
+
 ## Cache deception
 
 Appends a static-file extension or a nonexistent sub-path (`/nonexistent.js`, `.css`, `/nonexistent.jpg`, ...) to the resource's path and checks whether the (potentially authenticated) origin response is served — and looks cacheable — under that URL. This is [cache deception](https://cwe.mitre.org/data/definitions/524.html) via path confusion / static-extension probing.
 
-The static extensions probed come from the [CDN registry](./cdn-fingerprinting/#beyond-fingerprinting-static-extensions-cache-key-notes-and-quirks)'s `StaticExtensions` field (`cdn.AllStaticExtensions`) — every extension any registered CDN caches by default, deduplicated. The check also tries a handful of origin-only path delimiters (`;`, `%00`, `%0a`, `$`) ahead of the plain suffixes: some caches decide cacheability from whatever static-looking suffix follows one of these characters, while the origin ignores the delimiter and keeps routing on the full path — a distinct mechanism from a bare static extension, documented by PortSwigger's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) research.
+The static extensions probed come from the [CDN registry](./cdn-fingerprinting/#beyond-fingerprinting-static-extensions-cache-key-notes-and-quirks)'s `StaticExtensions` field (`cdn.AllStaticExtensions`) — every extension any registered CDN caches by default, deduplicated. The check also tries a handful of origin-only path delimiters (`;`, `%00`, `%0a`, `$`) ahead of the plain suffixes: some caches decide cacheability from whatever static-looking suffix follows one of these characters, while the origin ignores the delimiter and keeps routing on the full path — a distinct mechanism from a bare static extension, documented by PortSwigger's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) research. For a systematic sweep of *which* delimiters a target's origin and cache disagree on, see [Delimiter & normalization mapping](#delimiter--normalization-mapping) below.
 
 | Finding | Severity | CWE |
 |---|---|---|
 | Cache deception via path confusion | high | CWE-524 |
+
+## Delimiter & normalization mapping
+
+Maps the characters the **origin** treats as a path delimiter — truncating its route there — but a fronting **cache** keys on verbatim. That split is the foundation of both cache-key poisoning and cache deception: the cache stores the origin's real (possibly authenticated) response under a distinct, attacker-chosen URL. Based on Doyhenard's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) (Black Hat USA 2024).
+
+Each candidate uses the **baseline/suffix/insert** probe:
+
+- **R0** — the undelimited baseline response for the resource path.
+- **R1** — the path plus a random, unrouteable suffix (no delimiter). If R1 already matches R0, the origin ignores trailing path junk wholesale, so no delimiter's effect can be isolated and the sweep is skipped.
+- **R2** — the path plus a candidate delimiter plus that suffix. If R2 matches R0, the origin truncated its route at the delimiter while a cache keying on the full request path would store that response under the distinct `…<delimiter><suffix>` URL — an **origin-only delimiter**.
+
+The candidates probed, each sent on the wire exactly as written (the percent-encoded forms reach the origin as those literal bytes, not a decoded octet): `;`, `.`, `$`, `%00`, `%0a`, `%23`, `%5c`. A bare `#` from the research's candidate list is omitted deliberately — a spec-compliant client can't send an unencoded fragment delimiter in the path (it never leaves the client), so `%23` covers the only transmittable form.
+
+The check also probes **path-normalization order** with dot-segment traversal, encoded (`..%2f`) and plain (`../`): it inserts a nonexistent `/<rand>/../` detour that collapses back to the resource *only if the server normalizes the dot-segment*. An origin that normalizes while the fronting cache keys on the verbatim, un-normalized detour path is the "normalize before vs. after cache rules" discrepancy — CloudFront/Azure/Imperva normalize before applying cache rules (not affected), while Cloudflare/Google Cloud/Fastly do not (the cache stores the origin's response under the detour URL). The encoded form is the higher-risk one; a plain `../` is standard [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.4) behavior most caches share, so it's reported for mapping only.
+
+Per-origin results (the origin-only delimiters found, and both normalization verdicts) are recorded in the CDN quirk store (`cdn.DiscoveredQuirks`), accumulated across every resource probed under a target so a later resource — or an embedding tool — can reuse the mapping instead of re-probing.
+
+Like the cache-deception check, this probe compares live responses at the resource's own paths rather than writing content back through a cache-buster-isolated URL, so it runs after the rest of the §5 chain to avoid its baseline request racing another check's poison/confirm pair.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Origin-only path delimiter `<delimiter>` | high (cacheable) / medium | CWE-524 |
+| Origin normalizes encoded path traversal | high | CWE-524 |
+| Origin normalizes plain path traversal | info | CWE-524 |
+
+## Static-directory path-traversal deception
+
+Requests the resource through a path that *starts* under a static directory and climbs back out — `/static/<rand>/../../account` — and checks whether the origin still serves the resource and the response then gets cached. A cache that applies its "cache everything under `/static/`" rule to the raw path caches the origin's dynamic response under a URL anyone can request. Three spellings are tried, because caches and origins disagree on *when* they decode:
+
+| Variant | Path probed | Catches |
+|---|---|---|
+| plain | `/static/x/../../account` | cache matches its directory rule before resolving `../` |
+| encoded | `/static/x/..%2f..%2faccount` | cache matches the rule before decoding `%2f` |
+| nested-encoded | `/static/x/..%252f..%252faccount` | cache decodes once, origin keeps decoding until the separators are real |
+
+Directories tried, in order: `/static`, `/assets`, `/public`, `/images`, `/css`, `/js`, `/media`. Each variant stops at its first hit. With the default `--max-aggressive-requests` of `10`, `/static` and `/assets` are covered for all three variants; raise the cap to reach the rest.
+
+Matching the canonical response only shows the origin normalizes the path, which most do. So the check also:
+
+- sends a **control** request with no traversal (`/static/x/account`) and gives up if the origin serves the resource for that too — it routes loosely, and a match can't be attributed to normalization;
+- skips resources whose canonical URL is already a cache `HIT`, since caching one more URL for public content exposes nothing new;
+- repeats the matching request and looks for a cache `HIT`. A `HIT` on the traversal URL while the canonical URL isn't cached is the deception working (**high**). With no readable cache-status header the finding is **medium** and says caching wasn't observed.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Cache deception via static-directory path traversal | high (cache `HIT` observed) / medium | CWE-524 |
+| Cache deception via encoded static-directory path traversal | high / medium | CWE-524 |
+| Cache deception via nested-encoded static-directory path traversal | high / medium | CWE-524 |
+
+## Cache-key path collision
+
+The poisoning counterpart of the check above, also from ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all): a cache that **normalizes** `../` before computing its key while the origin **routes the raw path**. `/static/x/../../account` is then served by the origin as static content but stored under the key `/account` — one request overwrites any other path's cache entry ("cache what/where").
+
+The probe never touches a real entry. It collides onto a **random, never-requested path**: request `/static/<seg>/../../<rand>`, and if the origin answered with content that differs from what a nonexistent path returns, request `/<rand>` plainly. Getting the static content back from a path nothing ever served proves the cache keyed the first request as `/<rand>`. A catch-all origin (every path answers alike), or one that normalizes the path itself, produces no finding.
+
+Plain and `%2f`-encoded separators are tried against `/static` and `/assets`; the first confirmed collision ends the check. It needs a static route that returns `2xx` for an arbitrary filename under the directory, so an origin whose static handler 404s on unknown files can't be probed this way and is not reported.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Cache-key path collision via path traversal | critical | CWE-436 |
 
 ## Error response caching
 
@@ -76,3 +150,18 @@ Stops after the first confirmed variant per resource: once one has poisoned a (t
 | CPDoS via oversized headers (HHO) | high | CWE-444 |
 | CPDoS via method override (HMO) | high | CWE-444 |
 | CPDoS via HTTP meta-character (HMC) | high | CWE-444 |
+
+## Cache-key explosion
+
+Sends the resource 20 times, each with a different random value for one query parameter (its first existing one, or `cd_key`), and checks whether every value became its own cache entry — a `MISS` each time, and a `HIT` on repeating the first. If nothing ever caps the number of distinct entries, an attacker can fill the cache with junk and force an origin request per unique value, defeating the cache.
+
+Treat this as an exposure assessment, not a defect: most caches key on the full query string by design, so it reports at **low** severity and the fix is edge-side (rate limiting, query-parameter allowlisting or normalization). Two constraints keep it from guessing:
+
+- It needs `--max-aggressive-requests` of **at least 21** (20 distinct values plus one repeat) and a readable cache-status header. Below that there is no way to tell "no cap" from "a cap above the sample", so the check sends nothing at the default of `10`.
+- Any `HIT` among the 20 means a cap, a shared overflow bucket, or a parameter the cache doesn't key on, and ends the check without a finding.
+
+It leaves 20 junk entries in the target's cache, which is why it sits behind `--aggressive` with the rest of this page.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Unbounded cache-key cardinality | low | CWE-400 |

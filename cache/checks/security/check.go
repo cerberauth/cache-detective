@@ -24,19 +24,39 @@ import (
 // securityTag is applied to every CheckDef in this package.
 const securityTag = "security"
 
+const (
+	cacheDeceptionTag = "cache-deception"
+	cacheKeyTag       = "cache-key"
+
+	cvssPoisoning = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N"
+	cvssDeception = "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N"
+
+	owaspMisconfig     = "A05:2021-Security Misconfiguration"
+	owaspAccessControl = "A01:2021-Broken Access Control"
+
+	// langParam is a common locale parameter name shared by the wordlists.
+	langParam = "lang"
+)
+
 // cachePoisoningTag is applied to every CheckDef here that can plant
 // attacker-controlled content into a shared cache (as opposed to
 // cache-deception, which exfiltrates rather than plants).
 const cachePoisoningTag = "cache-poisoning"
+
+// cweCacheDeception is CWE-524 (Use of Cache Containing Sensitive
+// Information) — shared by the path-confusion, error-caching, and
+// delimiter-mapper checks, all of which describe a cache serving content it
+// shouldn't.
+const cweCacheDeception = "CWE-524"
 
 // aggressiveGate reports whether a security check should actually run.
 // Deliberately not wired as a harnessx.SkipDecision (checkdef.WithSkip):
 // harnessreport turns *every* check-level skip into a reportx Finding
 // (using the check's Name/CVSS as if it were an inert placeholder), with
 // no way to tell "explicitly gated off by design" apart from "found
-// nothing" or "genuinely vulnerable" in the JSON output. Since these five
+// nothing" or "genuinely vulnerable" in the JSON output. Since these
 // checks are gated off on every default (non-aggressive) scan, wiring
-// them through Skip would put five misleading entries in every report.
+// them through Skip would put a misleading entry per check in every report.
 // Checking the gate inside Run instead, and returning a plain empty
 // Result, avoids that: harnessreport only emits a Finding for a Result
 // that carries Observations or Data, so "gated off" produces no report
@@ -54,10 +74,10 @@ var UnkeyedHeaderDef = checkbase.CheckDef{
 	Description: "Wordlist-driven mining across headers, cookies, and query parameters commonly left unkeyed by CDNs: injects a marker via each candidate and checks whether a follow-up plain request receives the poisoned response — classic web cache poisoning (Kettle, \"Practical Web Cache Poisoning\", 2018; Param Miner).",
 	Tags:        []string{securityTag, cachePoisoningTag},
 	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
-	CVSSVector:  "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
+	CVSSVector:  cvssPoisoning,
 	CVSSScore:   9.3,
 	CWEID:       "CWE-444",
-	OWASP:       "A05:2021-Security Misconfiguration",
+	OWASP:       owaspMisconfig,
 }
 
 var UnkeyedHeaderCheck = checkdef.NewResourceCheck(UnkeyedHeaderDef, runUnkeyedHeader)
@@ -256,7 +276,7 @@ var CacheDeceptionDef = checkbase.CheckDef{
 	ID:          string(checkbase.CheckIDCacheDeception),
 	Name:        "Cache Deception",
 	Description: "Appends a static-file extension / nonexistent sub-path to the resource path and checks whether the (potentially authenticated) origin response gets cached under that URL.",
-	Tags:        []string{securityTag, "cache-deception"},
+	Tags:        []string{securityTag, cacheDeceptionTag},
 	// DependsOn UnkeyedHeaderCheck, not just Discovery: both checks issue a
 	// plain baseline GET at the same resource, and harnessx runs same-level
 	// checks concurrently. Against a single-slot demo cache, this check's
@@ -265,10 +285,10 @@ var CacheDeceptionDef = checkbase.CheckDef{
 	// clean one, masking that finding. See ResponseSplittingDef below for
 	// the same reasoning.
 	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDUnkeyedHeader)},
-	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N",
+	CVSSVector: cvssDeception,
 	CVSSScore:  8.1,
-	CWEID:      "CWE-524",
-	OWASP:      "A01:2021-Broken Access Control",
+	CWEID:      cweCacheDeception,
+	OWASP:      owaspAccessControl,
 }
 
 var CacheDeceptionCheck = checkdef.NewResourceCheck(CacheDeceptionDef, runCacheDeception)
@@ -335,7 +355,7 @@ func runCacheDeception(ctx context.Context, target harnessx.Target, resource har
 			continue
 		}
 
-		if ex.StatusCode == base.StatusCode && string(ex.Body) == string(base.Body) && cacheableResponse(ex.Method, ex.StatusCode, ex.Header) {
+		if sameResponse(base, ex) && cacheableResponse(ex.Method, ex.StatusCode, ex.Header) {
 			obs = append(obs, harnessx.Observation{
 				CheckID:     checkbase.CheckIDCacheDeception,
 				ResourceID:  resource.ID,
@@ -393,7 +413,7 @@ var ErrorCachingDef = checkbase.CheckDef{
 	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDCacheDeception)},
 	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L",
 	CVSSScore:  5.3,
-	CWEID:      "CWE-524",
+	CWEID:      cweCacheDeception,
 }
 
 var ErrorCachingCheck = checkdef.NewResourceCheck(ErrorCachingDef, runErrorCaching)
@@ -460,7 +480,7 @@ var ResponseSplittingDef = checkbase.CheckDef{
 	// against a given resource; it isn't unique to cache-detective's test
 	// suite.
 	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDErrorCaching)},
-	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N",
+	CVSSVector: cvssPoisoning,
 	CVSSScore:  9.3,
 	CWEID:      "CWE-113",
 }

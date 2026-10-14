@@ -200,6 +200,28 @@ const (
 	// CheckIDCPDoS is the §5 Cache-Poisoned Denial-of-Service check (the
 	// 2019 CPDoS disclosure's HHO/HMC/HMO variants).
 	CheckIDCPDoS harnessx.CheckID = "cpdos"
+	// CheckIDDelimiterMapper is the §5 delimiter & path-normalization
+	// discrepancy mapper (Doyhenard, "Gotta cache 'em all", Black Hat USA
+	// 2024): the characters the origin treats as a path delimiter but a cache
+	// keys on verbatim, and whether the origin collapses dot-segment traversal.
+	CheckIDDelimiterMapper harnessx.CheckID = "delimiter-mapper"
+	// CheckIDEntanglement is the §5 web-cache-entanglement check (Kettle, "Web
+	// Cache Entanglement", 2020): request inputs the origin reads but the
+	// cache key ignores — a GET request body ("fat GET") and a ";"-cloaked
+	// query parameter.
+	CheckIDEntanglement harnessx.CheckID = "cache-entanglement"
+	// CheckIDNormalizationDeception is the §5 static-directory /
+	// nested-encoding path-normalization deception check (Doyhenard, "Gotta
+	// cache 'em all", Black Hat USA 2024).
+	CheckIDNormalizationDeception harnessx.CheckID = "normalization-deception"
+	// CheckIDKeyCollision is the §5 cache-key collision check: a cache that
+	// normalizes "../" before keying while the origin routes the raw path
+	// (Doyhenard, 2024), letting one request overwrite another path's entry.
+	CheckIDKeyCollision harnessx.CheckID = "key-collision"
+	// CheckIDKeyExplosion is the §5 cache-key cardinality check: whether the
+	// cache keeps a separate entry per distinct value of an arbitrary query
+	// parameter, with no cap.
+	CheckIDKeyExplosion harnessx.CheckID = "key-explosion"
 	// CheckIDConsistency is the §6 response-consistency & correctness check.
 	CheckIDConsistency harnessx.CheckID = "consistency"
 	// CheckIDStaleServing is the §9 stale-while-revalidate/stale-if-error
@@ -209,4 +231,8 @@ const (
 	// marked cacheable" misconfiguration check, split out from
 	// CheckIDCacheability so it can carry its own CVSS/CWE severity.
 	CheckIDAuthCacheable harnessx.CheckID = "authenticated-cacheable"
+	// CheckIDSessionCacheable is the "cacheable response sets a cookie"
+	// misconfiguration check — the unauthenticated-request counterpart of
+	// CheckIDAuthCacheable, for responses that mint a session/CSRF cookie.
+	CheckIDSessionCacheable harnessx.CheckID = "session-cacheable"
 )

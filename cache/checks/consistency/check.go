@@ -34,6 +34,15 @@ type Result struct {
 	ConditionalRequestHonored *bool // nil when no validator was available to test with
 	IsRedirect                bool
 	RedirectCacheable         bool
+	ValidatorUnstable         bool // ETag differed between two identical responses
+}
+
+func fetchAgain(ctx context.Context, pctx *checkbase.ProbeCtx, url string) (checkbase.Exchange, error) {
+	req, err := checkbase.NewRequest(ctx, url, pctx, nil)
+	if err != nil {
+		return checkbase.Exchange{}, err
+	}
+	return checkbase.Do(ctx, pctx, req)
 }
 
 func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource, store harnessx.ResultStore) (harnessx.Result, error) {
@@ -91,6 +100,23 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 						Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityLow},
 					})
 				}
+			}
+		}
+	}
+
+	// A validator that changes while the body doesn't can never match a
+	// later conditional request, so revalidation degrades into a full
+	// re-transfer every time even if the server honors If-None-Match.
+	if etag != "" {
+		if again, err := fetchAgain(ctx, pctx, resource.URL); err == nil {
+			if again.Header.Get("ETag") != etag && string(again.Body) == string(base.Body) && again.StatusCode == base.StatusCode {
+				res.ValidatorUnstable = true
+				obs = append(obs, harnessx.Observation{
+					Title:       "Unstable ETag validator",
+					Description: fmt.Sprintf("two consecutive requests returned byte-identical bodies but different ETags (%s, then %s) — a validator that flaps on unchanged content can never match a later If-None-Match, so caches can't revalidate and must re-transfer the full response every time", etag, again.Header.Get("ETag")),
+					Evidence:    fmt.Sprintf("ETag %s != %s", etag, again.Header.Get("ETag")),
+					Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityLow},
+				})
 			}
 		}
 	}

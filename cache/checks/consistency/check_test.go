@@ -2,8 +2,10 @@ package consistency_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cerberauth/harnessx"
@@ -74,6 +76,63 @@ func TestCheck_ConditionalRequestNotHonored(t *testing.T) {
 	assert.False(t, *data.ConditionalRequestHonored)
 	require.NotEmpty(t, res.Observations)
 	assert.Equal(t, "Conditional request not honored", res.Observations[0].Title)
+}
+
+func TestCheck_UnstableETagFlagged(t *testing.T) {
+	var n atomic.Int64
+	summary, _ := runCheck(t, func(w http.ResponseWriter, r *http.Request) {
+		// A new validator on every response for a body that never changes —
+		// no conditional request can ever match it.
+		w.Header().Set("ETag", fmt.Sprintf(`"v%d"`, n.Add(1)))
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Write([]byte("body"))
+	})
+
+	res, ok := findResult(summary, checkbase.CheckIDConsistency, "root")
+	require.True(t, ok)
+	data, ok := harnessx.DataAs[consistency.Result](res)
+	require.True(t, ok)
+	assert.True(t, data.ValidatorUnstable)
+	var titles []string
+	for _, o := range res.Observations {
+		titles = append(titles, o.Title)
+	}
+	assert.Contains(t, titles, "Unstable ETag validator")
+}
+
+func TestCheck_StableETagNotFlaggedAsUnstable(t *testing.T) {
+	summary, _ := runCheck(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Write([]byte("body"))
+	})
+
+	res, ok := findResult(summary, checkbase.CheckIDConsistency, "root")
+	require.True(t, ok)
+	data, ok := harnessx.DataAs[consistency.Result](res)
+	require.True(t, ok)
+	assert.False(t, data.ValidatorUnstable)
+}
+
+// TestCheck_ETagChangingWithBodyNotFlaggedAsUnstable: a validator that moves
+// because the content moved is doing its job.
+func TestCheck_ETagChangingWithBodyNotFlaggedAsUnstable(t *testing.T) {
+	var n atomic.Int64
+	summary, _ := runCheck(t, func(w http.ResponseWriter, r *http.Request) {
+		v := n.Add(1)
+		w.Header().Set("ETag", fmt.Sprintf(`"v%d"`, v))
+		w.Write([]byte(fmt.Sprintf("body %d", v)))
+	})
+
+	res, ok := findResult(summary, checkbase.CheckIDConsistency, "root")
+	require.True(t, ok)
+	data, ok := harnessx.DataAs[consistency.Result](res)
+	require.True(t, ok)
+	assert.False(t, data.ValidatorUnstable)
 }
 
 func TestCheck_RedirectWithoutExplicitFreshness(t *testing.T) {

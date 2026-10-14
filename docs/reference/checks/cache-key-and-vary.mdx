@@ -28,3 +28,17 @@ For each of `Accept-Encoding`, `Accept-Language`, `User-Agent`, and a custom hea
 ## Request budget
 
 This check issues extra requests to the live target but is **not** gated behind `--aggressive` — it's read-only from the target's point of view (it never plants content a poisoned cache would later replay; that's [Cache poisoning & deception](../cache-poisoning-and-deception/)'s job). It still respects `--max-aggressive-requests` as a hard cap on probe count per resource.
+
+## Credentials in the cache key
+
+Varying `Accept-Language` or `User-Agent` shows whether the cache keys on them. Credentials can't be probed that way: a cache that ignores `Authorization` or `Cookie` gives the same response for a *different* valid token, and for no token at all. So when the scan carries credentials (`--bearer`, `--cookie`, or an auth profile), the check repeats the request with `Authorization` and `Cookie` stripped. Other configured headers stay on, so a custom API-key header isn't stripped and goes unreported rather than misreported.
+
+If that credential-less request comes back identical to the authenticated one, either the content is public or a cache replayed it. A second credential-less request, against a cache-buster-isolated URL no cache entry can answer, tells them apart:
+
+| Observation | Finding | Severity |
+|---|---|---|
+| The isolated request is refused or differs | Authenticated response served to unauthenticated request — the origin withholds the content and a cache replayed it anyway | critical |
+| The isolated request is also a cache `HIT` on the same body | Same finding, but the cache ignores the query string so the origin couldn't be observed in isolation — confirm the content is meant to be public | high |
+| The isolated request matches and isn't a `HIT` | None — the origin serves this content to anyone | — |
+
+This catches the missing `Vary: Cookie` case (a personalized page cached under a shared key) and a cache keyed on the path alone that ignores `Authorization`. It costs two requests from the `--max-aggressive-requests` budget.

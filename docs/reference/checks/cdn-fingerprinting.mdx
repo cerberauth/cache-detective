@@ -45,6 +45,8 @@ Each `Signature` in the registry also carries three fields the fingerprinting ch
 - **`KeyNormalization`** — a free-text note on how/when that CDN normalizes cache-key inputs (query-string ordering/stripping, delimiter handling, case folding) relative to `Vary`/`Cache-Control` evaluation. This is documentation for interpreting an unexpected HIT/MISS, not something `Detect` matches against.
 - **`Quirks`** — known, disclosed CDN-specific caching behaviors or CVEs relevant to cache-poisoning/deception risk, each with an `ID`, `Description`, and `Reference` URL.
 
+Separate from these *static*, per-signature fields, the `cdn` package also exposes a *runtime* quirk store, `cdn.DiscoveredQuirks` — a concurrency-safe map of target origin to the delimiter and path-normalization behavior the [delimiter & normalization mapper](../cache-poisoning-and-deception/#delimiter--normalization-mapping) discovers at scan time. It accumulates across every resource probed under an origin so a later resource (or an embedding tool) can reuse a result instead of re-probing.
+
 ### Known disclosed issues referenced in the registry
 
 | Quirk | Affected | Reference |

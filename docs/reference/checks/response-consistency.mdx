@@ -22,3 +22,5 @@ Checks whether a redirect response (301/302/303/307/308) is cacheable and, if so
 | Finding | Severity | Meaning |
 |---|---|---|
 | Redirect cached with only heuristic freshness | low | The redirect is cacheable by default status semantics but has no explicit `max-age`/`s-maxage`/`Expires` — caches may apply their own heuristic TTL, which can outlive the redirect's intended lifetime |
+| Conditional request not honored | low | A request with `If-None-Match`/`If-Modified-Since` matching the resource's own validator got something other than `304 Not Modified`, forcing a full re-transfer |
+| Unstable ETag validator | low | Two consecutive requests returned identical bodies but different `ETag`s, so no later `If-None-Match` can ever match. Checked with one extra request, and only when the response has an `ETag` |

@@ -199,6 +199,51 @@ jobs:
             echo "No finding for the fixed /stale fixture, as expected"
           fi
 
+      - name: Scan cache-key, deception, and response fixtures (aggressive) and check each matches the expected vulnerability state
+        # One scan per fixture, each judged by a finding title. Failures are
+        # collected rather than aborting on the first, so a run reports every
+        # fixture that regressed. See testdata/fixtureserver for what each
+        # one simulates and which api-vulns-challenges challenge it mirrors.
+        run: |
+          failed=0
+          check() {
+            local path="$1" args="$2" title="$3" report
+            report="fixture-$(echo "$path$title" | tr -c 'a-zA-Z0-9' '-').json"
+            ./cache-detective scan --url "http://localhost:8080$path" $args --sqa-opt-out \
+              --output-format json --output "$report" --quiet
+            local count
+            count=$(jq --arg t "$title" '[.findings[] | select(.title | startswith($t))] | length' "$report")
+            if [ "${{ matrix.vulnerable }}" = "true" ]; then
+              if [ "$count" -eq 0 ]; then
+                echo "::error::No \"$title\" finding for the vulnerable $path fixture"; failed=1
+              else
+                echo "ok: $count \"$title\" finding(s) for the vulnerable $path fixture"
+              fi
+            else
+              if [ "$count" -gt 0 ]; then
+                echo "::error::Unexpected \"$title\" finding for the fixed $path fixture"; failed=1
+              else
+                echo "ok: no \"$title\" finding for the fixed $path fixture"
+              fi
+            fi
+          }
+
+          check "/fat-get?q=cats" "--requests 1 --aggressive" "Cache poisoning via fat GET request body"
+          check "/cloak?id=1" "--requests 1 --aggressive" "Cache poisoning via parameter cloaking"
+          check "/me" "--requests 1 --aggressive --bearer fixture-token" "Cache deception via static-directory path traversal"
+          check "/me" "--requests 1 --aggressive --bearer fixture-token" "Cache deception via nested-encoded static-directory path traversal"
+          check "/cacheable" "--requests 1 --aggressive" "Cache-key path collision via path traversal"
+          # The key-explosion check needs at least 21 requests (20 distinct
+          # values plus a repeat) to tell "no cap" from "a cap above the sample".
+          check "/explode?q=test" "--requests 1 --aggressive --max-aggressive-requests 30" "Unbounded cache-key cardinality"
+          check "/vault" "--requests 1 --bearer fixture-token" "Authenticated response served to unauthenticated request"
+          check "/session" "--requests 1" "Cacheable response sets a cookie"
+          check "/validator" "--requests 1" "Unstable ETag validator"
+          # Three samples, so the live-state check sees the MISS-then-HIT.
+          check "/flaky" "--requests 3" "Response with a non-cacheable status is being served from cache"
+
+          exit $failed
+
   run-scan-challenges:
     name: Scan challenge - ${{ matrix.challenge }} (${{ matrix.vulnerable && 'vulnerable' || 'not vulnerable' }})
     runs-on: ubuntu-latest
@@ -314,6 +359,104 @@ jobs:
             vulnerable: false
             scan_args: "--aggressive --auth-profiles auth-profiles.json --max-retries 2 --retry-delay 200ms"
             expect_title: "Authenticated response marked cacheable"
+          - challenge: "cache-conditional-validators"
+            path: "/resource"
+            vulnerable: true
+            expect_title: "Unstable ETag validator"
+          - challenge: "cache-conditional-validators"
+            path: "/resource"
+            vulnerable: false
+            expect_title: "Unstable ETag validator"
+          - challenge: "cache-poisoning-fat-get"
+            path: "/search?q=cats"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Cache poisoning via fat GET request body"
+          - challenge: "cache-poisoning-fat-get"
+            path: "/search?q=cats"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Cache poisoning via fat GET request body"
+          - challenge: "cache-poisoning-parameter-cloaking"
+            path: "/greet?id=1"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Cache poisoning via parameter cloaking"
+          - challenge: "cache-poisoning-parameter-cloaking"
+            path: "/greet?id=1"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Cache poisoning via parameter cloaking"
+          - challenge: "cache-deception-static-directory"
+            path: "/account"
+            vulnerable: true
+            scan_args: "--aggressive --bearer victim-secret-token"
+            expect_title: "Cache deception via static-directory path traversal"
+          - challenge: "cache-deception-static-directory"
+            path: "/account"
+            vulnerable: false
+            scan_args: "--aggressive --bearer victim-secret-token"
+            expect_title: "Cache deception via static-directory path traversal"
+          - challenge: "cache-deception-normalization"
+            path: "/account"
+            vulnerable: true
+            scan_args: "--aggressive --bearer victim-secret-token"
+            expect_title: "Cache deception via nested-encoded static-directory path traversal"
+          - challenge: "cache-deception-normalization"
+            path: "/account"
+            vulnerable: false
+            scan_args: "--aggressive --bearer victim-secret-token"
+            expect_title: "Cache deception via nested-encoded static-directory path traversal"
+          - challenge: "cache-poisoning-key-collision"
+            path: "/account"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Cache-key path collision via path traversal"
+          - challenge: "cache-poisoning-key-collision"
+            path: "/account"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Cache-key path collision via path traversal"
+          - challenge: "cache-key-explosion-dos"
+            path: "/search?q=test"
+            vulnerable: true
+            scan_args: "--aggressive --max-aggressive-requests 30"
+            expect_title: "Unbounded cache-key cardinality"
+          - challenge: "cache-key-explosion-dos"
+            path: "/search?q=test"
+            vulnerable: false
+            scan_args: "--aggressive --max-aggressive-requests 30"
+            expect_title: "Unbounded cache-key cardinality"
+          - challenge: "cache-sensitive-data-exposure"
+            path: "/dashboard"
+            vulnerable: true
+            scan_args: "--aggressive"
+            expect_title: "Cacheable response sets a cookie"
+          - challenge: "cache-sensitive-data-exposure"
+            path: "/dashboard"
+            vulnerable: false
+            scan_args: "--aggressive"
+            expect_title: "Cacheable response sets a cookie"
+          - challenge: "proxy-cache-deception"
+            path: "/account"
+            vulnerable: true
+            scan_args: "--bearer victim-secret-token"
+            expect_title: "Authenticated response served to unauthenticated request"
+          - challenge: "proxy-cache-deception"
+            path: "/account"
+            vulnerable: false
+            scan_args: "--bearer victim-secret-token"
+            expect_title: "Authenticated response served to unauthenticated request"
+          - challenge: "cache-vary-misconfiguration"
+            path: "/home"
+            vulnerable: true
+            scan_args: "--cookie session=cache-detective-scan"
+            expect_title: "Authenticated response served to unauthenticated request"
+          - challenge: "cache-vary-misconfiguration"
+            path: "/home"
+            vulnerable: false
+            scan_args: "--cookie session=cache-detective-scan"
+            expect_title: "Authenticated response served to unauthenticated request"
 
     steps:
       - uses: actions/checkout@v7
@@ -379,9 +522,14 @@ jobs:
           fi
 
       - name: Check authenticated-cacheable severity escalates on sensitive content
-        if: ${{ matrix.challenge == 'cache-sensitive-data-exposure' && matrix.vulnerable }}
+        if: ${{ matrix.challenge == 'cache-sensitive-data-exposure' && matrix.vulnerable && matrix.expect_title == 'Authenticated response marked cacheable' }}
         run: |
           jq -e '[.findings[] | select(.title == "Authenticated response marked cacheable") | select(.extra.severity == "critical")] | length > 0' challenge-report.json
+
+      - name: Check cacheable-Set-Cookie severity escalates on a token in the body
+        if: ${{ matrix.challenge == 'cache-sensitive-data-exposure' && matrix.vulnerable && matrix.expect_title == 'Cacheable response sets a cookie' }}
+        run: |
+          jq -e '[.findings[] | select(.title == "Cacheable response sets a cookie") | select(.extra.severity == "critical")] | length > 0' challenge-report.json
 
       - name: Stop challenge server
         if: ${{ always() }}

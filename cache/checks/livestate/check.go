@@ -71,7 +71,14 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 					Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityLow},
 				})
 			}
-			if !declared.Cacheable && analysis.HitCount > 0 {
+			if !declared.Cacheable && analysis.HitCount > 0 && heuristicallyCachedStatus(declared) {
+				obs = append(obs, harnessx.Observation{
+					Title:       "Response with a non-cacheable status is being served from cache",
+					Description: fmt.Sprintf("the %d response carries no Cache-Control/Expires, and RFC 9110 §15.1 doesn't list %d among the statuses a cache may store by default — yet at least one sample was a cache HIT. The cache is applying heuristic freshness to a status it shouldn't, so a transient origin failure can be replayed to callers long after the origin recovers", declared.StatusCode, declared.StatusCode),
+					Evidence:    fmt.Sprintf("status=%d, cache hits=%d of %d samples", declared.StatusCode, analysis.HitCount, len(analysis.Samples)),
+					Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityMedium},
+				})
+			} else if !declared.Cacheable && analysis.HitCount > 0 {
 				obs = append(obs, harnessx.Observation{
 					Title:       "Non-cacheable response is being served from cache",
 					Description: "the response is not supposed to be cacheable per its headers, but at least one sample was served as a cache HIT — check for stale Cache-Control on an edge config that doesn't match the origin",
@@ -87,4 +94,14 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 	}
 
 	return harnessx.Result{Data: analysis, Observations: obs}, nil
+}
+
+// heuristicallyCachedStatus reports whether a response is uncacheable
+// *only* because its status has no default cache semantics and it declares
+// no freshness — so a HIT on it can only come from the cache inventing a
+// heuristic lifetime, rather than from a stale Cache-Control on the edge.
+func heuristicallyCachedStatus(a cacheability.AnalysisResult) bool {
+	cc := a.CacheControl
+	explicit := cc.MaxAge != nil || cc.SMaxAge != nil || a.Expires != nil
+	return !cc.NoStore && !cc.NoCache && !cc.Private && !explicit && !cacheability.StatusDefaultCacheable(a.StatusCode)
 }

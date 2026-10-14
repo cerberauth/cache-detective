@@ -14,7 +14,7 @@ var sensitiveDataPatterns = []struct {
 }{
 	{"email address", regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)},
 	{"JWT", regexp.MustCompile(`eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}`)},
-	{"credential/token field", regexp.MustCompile(`(?i)"(access_token|refresh_token|api_key|apikey|secret|password|ssn|credit_card|card_number)"\s*:\s*"[^"]+"`)},
+	{"credential/token field", regexp.MustCompile(`(?i)"(access_token|refresh_token|id_token|api_key|apikey|secret|password|ssn|credit_card|card_number|csrf_token|csrf|xsrf_token|session_id|session_token)"\s*:\s*"[^"]+"`)},
 	{"credit card number", regexp.MustCompile(`\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b`)},
 	{"SSN", regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)},
 }

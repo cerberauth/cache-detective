@@ -59,27 +59,42 @@ The static extensions probed come from the [CDN registry](./cdn-fingerprinting/#
 
 ## Delimiter & normalization mapping
 
-Maps the characters the **origin** treats as a path delimiter — truncating its route there — but a fronting **cache** keys on verbatim. That split is the foundation of both cache-key poisoning and cache deception: the cache stores the origin's real (possibly authenticated) response under a distinct, attacker-chosen URL. Based on Doyhenard's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) (Black Hat USA 2024).
+Maps the characters the **origin** treats as a path delimiter — truncating its route there — but a fronting **cache** keys on verbatim, and the reverse: characters the **cache** truncates its key at while the origin routes on the full path. That split is the foundation of both cache-key poisoning and cache deception: the cache stores the origin's real (possibly authenticated) response under a distinct, attacker-chosen URL, or stores an attacker-provoked response under the real resource's key. Based on Doyhenard's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) (Black Hat USA 2024).
 
 Each candidate uses the **baseline/suffix/insert** probe:
 
 - **R0** — the undelimited baseline response for the resource path.
 - **R1** — the path plus a random, unrouteable suffix (no delimiter). If R1 already matches R0, the origin ignores trailing path junk wholesale, so no delimiter's effect can be isolated and the sweep is skipped.
-- **R2** — the path plus a candidate delimiter plus that suffix. If R2 matches R0, the origin truncated its route at the delimiter while a cache keying on the full request path would store that response under the distinct `…<delimiter><suffix>` URL — an **origin-only delimiter**.
+- **R2** — the path plus a candidate delimiter plus that suffix. If R2 matches R0, the origin truncated its route at the delimiter while a cache keying on the full request path would store that response under the distinct `…<delimiter><suffix>` URL — an **origin-only delimiter**. R1 and R2 each carry their own cache-buster, so they are answered by the origin's routing of that exact path — otherwise a cache that truncates its key at the delimiter would replay the cached baseline and be mistaken for an origin-only delimiter.
+
+For a candidate where R2 differs from R0 the check tests the **reverse direction** on a cache-buster-isolated entry: it requests `<path>?<buster>` + delimiter + suffix (the origin answers with something other than R0, typically a 404), then the plain `<path>?<buster>`. If that second, undelimited request is served the first one's response, the cache keyed it under the undelimited key — it truncates at the delimiter — a **cache-only delimiter**. Any response the origin can be made to return for the delimited URL then replaces the real resource for every visitor (cache poisoning / denial of service). This costs two extra requests per candidate and runs after the other probes.
 
 The candidates probed, each sent on the wire exactly as written (the percent-encoded forms reach the origin as those literal bytes, not a decoded octet): `;`, `.`, `$`, `%00`, `%0a`, `%23`, `%5c`. A bare `#` from the research's candidate list is omitted deliberately — a spec-compliant client can't send an unencoded fragment delimiter in the path (it never leaves the client), so `%23` covers the only transmittable form.
 
-The check also probes **path-normalization order** with dot-segment traversal, encoded (`..%2f`) and plain (`../`): it inserts a nonexistent `/<rand>/../` detour that collapses back to the resource *only if the server normalizes the dot-segment*. An origin that normalizes while the fronting cache keys on the verbatim, un-normalized detour path is the "normalize before vs. after cache rules" discrepancy — CloudFront/Azure/Imperva normalize before applying cache rules (not affected), while Cloudflare/Google Cloud/Fastly do not (the cache stores the origin's response under the detour URL). The encoded form is the higher-risk one; a plain `../` is standard [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.4) behavior most caches share, so it's reported for mapping only.
+The check also probes **path-normalization order** with dot-segment traversal, encoded (`..%2f`) and plain (`../`): it inserts a nonexistent `/<rand>/../` detour that collapses back to the resource *only if the server normalizes the dot-segment*. An origin that normalizes while the fronting cache keys on the verbatim, un-normalized detour path is the "normalize before vs. after cache rules" discrepancy — CloudFront/Azure/Imperva normalize before applying cache rules (not affected), while Cloudflare/Google Cloud/Fastly do not (the cache stores the origin's response under the detour URL). The encoded form is the higher-risk one; a plain `../` is standard [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-5.2.4) behavior most caches share, so the *origin* result alone is reported for mapping only.
 
-Per-origin results (the origin-only delimiters found, and both normalization verdicts) are recorded in the CDN quirk store (`cdn.DiscoveredQuirks`), accumulated across every resource probed under a target so a later resource — or an embedding tool — can reuse the mapping instead of re-probing.
+For each form the origin normalizes, the check then **measures the cache side** on a cache-buster-isolated entry. It primes `<path>?<buster>` and requires the repeat to be served from cache (a normalized `HIT`, or a non-zero `Age`) — otherwise the cache isn't observably storing the resource and the order can't be told apart from a miss. Then it requests the detour with a fresh random segment and the same buster:
 
-Like the cache-deception check, this probe compares live responses at the resource's own paths rather than writing content back through a cache-buster-isolated URL, so it runs after the rest of the §5 chain to avoid its baseline request racing another check's poison/confirm pair.
+- served from cache straight away → the detour collapsed onto the primed canonical key: the cache **normalizes before** keying (info — it agrees with the origin);
+- a miss, then served from cache on a repeat → the cache stored the origin's response under the verbatim detour URL: it **normalizes after** (or never) — the web-cache-deception condition (high for the encoded form, medium for the plain one);
+- neither → not determined, and nothing is recorded.
+
+The measured order is compared with the `PathNormalization` the [CDN registry](./cdn-fingerprinting/) documents for the detected CDN, and the finding notes whether they agree — a customer's rule set or an extra cache tier can override the vendor default. If the order can't be measured but the CDN is fingerprinted with documented behavior, an info finding states that unverified expectation. The probe costs up to six requests (two to prime, up to two per form).
+
+Per-origin results (the origin-only and cache-only delimiters found, the origin's normalization verdicts, and the measured cache-side order for each form) are recorded in the CDN quirk store (`cdn.DiscoveredQuirks`), accumulated across every resource probed under a target so a later resource — or an embedding tool — can reuse the mapping instead of re-probing.
+
+The baseline R0 is fetched at the resource's own URL, so the check runs after the rest of the §5 chain to avoid that request racing another check's poison/confirm pair; every request that could write to a cache is cache-buster-isolated. Full coverage needs a request budget well above the default: up to 30 requests per resource (the origin-side sweep takes 10; the rest go to the cache-side probes in order — normalization order, then cache-only delimiters), so raise `--max-aggressive-requests` to cover them.
 
 | Finding | Severity | CWE |
 |---|---|---|
 | Origin-only path delimiter `<delimiter>` | high (cacheable) / medium | CWE-524 |
 | Origin normalizes encoded path traversal | high | CWE-524 |
 | Origin normalizes plain path traversal | info | CWE-524 |
+| Cache-only path delimiter `<delimiter>` | high | CWE-524 |
+| Cache keys encoded `..%2f` traversal verbatim | high | CWE-524 |
+| Cache keys plain `../` traversal verbatim | medium | CWE-524 |
+| Cache normalizes encoded/plain traversal before applying cache rules | info | CWE-524 |
+| Cache path-normalization order not observable | info | CWE-524 |
 
 ## Static-directory path-traversal deception
 

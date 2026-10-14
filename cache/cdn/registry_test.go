@@ -130,3 +130,28 @@ func TestDetect_KeyCDN(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "KeyCDN", sig.Name)
 }
+
+// TestRegistry_DocumentedPathNormalization pins the before/after-cache-rules
+// split from Doyhenard, "Gotta cache 'em all" (Black Hat USA 2024), for the
+// CDNs in the registry that research covers.
+func TestRegistry_DocumentedPathNormalization(t *testing.T) {
+	want := map[string]cdn.NormalizationOrder{
+		"Amazon CloudFront": cdn.NormalizesBeforeRules,
+		"Azure Front Door":  cdn.NormalizesBeforeRules,
+		"Cloudflare":        cdn.NormalizesAfterRules,
+		"Google Cloud CDN":  cdn.NormalizesAfterRules,
+		"Fastly":            cdn.NormalizesAfterRules,
+	}
+	for name, order := range want {
+		sig, ok := cdn.ByName(name)
+		require.True(t, ok, name)
+		assert.Equal(t, order, sig.PathNormalization, name)
+	}
+
+	sig, ok := cdn.ByName("cloudflare")
+	require.True(t, ok, "ByName is case-insensitive")
+	assert.Equal(t, "Cloudflare", sig.Name)
+
+	_, ok = cdn.ByName("no-such-cdn")
+	assert.False(t, ok)
+}

@@ -83,3 +83,30 @@ func TestQuirkStore_RecordEmptyOriginNoop(t *testing.T) {
 	_, ok := store.Lookup("")
 	assert.False(t, ok)
 }
+
+// TestQuirkStore_RecordsCacheSideResults proves cache-only delimiters are kept
+// distinct from origin-only ones for the same character, and that measured
+// cache normalization orders merge without a later unknown erasing them.
+func TestQuirkStore_RecordsCacheSideResults(t *testing.T) {
+	store := cdn.NewQuirkStore()
+	store.Record(cdn.TargetQuirks{
+		Origin:                "https://example.test",
+		Delimiters:            []cdn.DelimiterDiscrepancy{{Delimiter: ";", OriginOnly: true}},
+		CacheEncodedTraversal: cdn.NormalizesAfterRules,
+	})
+	store.Record(cdn.TargetQuirks{
+		Origin:         "https://example.test",
+		Delimiters:     []cdn.DelimiterDiscrepancy{{Delimiter: ";", CacheOnly: true, Cacheable: true}},
+		CacheTraversal: cdn.NormalizesBeforeRules,
+	})
+	// An unobserved order on a later resource must not wipe a measured one.
+	store.Record(cdn.TargetQuirks{Origin: "https://example.test"})
+
+	got, ok := store.Lookup("https://example.test")
+	require.True(t, ok)
+	require.Len(t, got.Delimiters, 2)
+	assert.True(t, got.Delimiters[0].OriginOnly)
+	assert.True(t, got.Delimiters[1].CacheOnly)
+	assert.Equal(t, cdn.NormalizesAfterRules, got.CacheEncodedTraversal)
+	assert.Equal(t, cdn.NormalizesBeforeRules, got.CacheTraversal)
+}

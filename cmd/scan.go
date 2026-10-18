@@ -4,17 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/cerberauth/harnessx"
 	"github.com/cerberauth/harnessx/probe"
-	"github.com/cerberauth/harnessx/reporters"
 	cobrareportx "github.com/cerberauth/x/cobrax/reportx"
 	"github.com/cerberauth/x/reportx/harnessreport"
 	"github.com/cerberauth/x/telemetryx"
 	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel"
 
 	cache "github.com/cerberauth/cache-detective/cache"
 	"github.com/cerberauth/cache-detective/cache/checkbase"
@@ -50,8 +47,6 @@ var (
 	scanMaxConcurrency    int
 	scanMaxResourceConc   int
 )
-
-var scanOtelName = "github.com/cerberauth/cache-detective/cmd/scan"
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
@@ -146,16 +141,9 @@ Use only against systems you own or have explicit written permission to test.`,
 			CheckDefs:   cache.CheckDefs(),
 		})
 
-		otelReporter, _ := reporters.NewOTelReporter(
-			ctx,
-			otel.Tracer(scanOtelName),
-			telemetryx.GetMeterProvider().Meter(scanOtelName),
-			reporters.WithPrefix("cache.scan"),
-		)
-
 		summary, err := cache.ScanAll(ctx, target, cache.ScanOptions{
 			ProbeCtx:               pctx,
-			Reporters:              []harnessx.Reporter{otelReporter, reportxReporter},
+			Reporters:              []harnessx.Reporter{reportxReporter},
 			MaxConcurrency:         scanMaxConcurrency,
 			MaxResourceConcurrency: scanMaxResourceConc,
 		})
@@ -168,7 +156,7 @@ Use only against systems you own or have explicit written permission to test.`,
 		}
 
 		if summary.Failed > 0 {
-			os.Exit(1)
+			telemetryx.Exit(cmd, 1)
 		}
 		return nil
 	},

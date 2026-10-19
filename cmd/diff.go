@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/cerberauth/x/telemetryx"
 	"github.com/spf13/cobra"
 )
 
@@ -82,7 +83,7 @@ severity between the two — cache-config drift detection (§9).`,
 		printSection(cmd, "Changed severity", changed)
 
 		if len(added) > 0 || len(changed) > 0 {
-			os.Exit(1)
+			telemetryx.Exit(cmd, 1)
 		}
 		return nil
 	},

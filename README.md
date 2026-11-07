@@ -344,6 +344,10 @@ Per the project's phased build-out, §1 (cacheability) and §2 (live-state) are 
 
 ---
 
+## Telemetry
+
+The CLI collects anonymous usage data to help improve the tool: which command ran, the names (never the values) of the flags used, how the command exited and how long it took, the CLI version, OS and architecture, and basic resource usage, how often a command was mistyped (never what you typed), whether it crashed (never the crash message), plus a few counts that never contain your input: how many URLs each scan covers and where they came from (`--url`, `--list`, `--sitemap`, `--har` or `--crawl`), the outcome of each check (passed, vulnerable, skipped or error, with the check's name and severity), how long each check took and how many findings each scan reports by severity. Interactive runs also include a random install and session identifier, the shell and terminal emulator you run it in (from a fixed list) and whether its output is piped; runs in CI are fully anonymous. URLs, headers, cookies, responses and evidence are never collected. You can opt out of telemetry by passing the `--sqa-opt-out` flag, or by setting `DO_NOT_TRACK=1` (or `ARGVIO_DISABLED=1`).
+
 ## License
 
 MIT © [CerberAuth](https://www.cerberauth.com/) — see [LICENSE](https://github.com/cerberauth/cache-detective/blob/main/LICENSE) for details.

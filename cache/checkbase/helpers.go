@@ -120,15 +120,15 @@ func DoRaw(ctx context.Context, pctx *ProbeCtx, req *http.Request) (Exchange, er
 }
 
 func doWithClient(ctx context.Context, client *http.Client, req *http.Request) (Exchange, error) {
-	status, header, body, dur, err := probe.Do(ctx, client, req)
+	resp, err := probe.DoResponse(ctx, client, req)
 	if err != nil {
 		return Exchange{}, err
 	}
 	return Exchange{
-		StatusCode: status,
-		Header:     header,
-		Body:       body,
-		Duration:   dur,
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header,
+		Body:       resp.Body,
+		Duration:   resp.Duration,
 		RequestURL: req.URL.String(),
 		Method:     req.Method,
 	}, nil

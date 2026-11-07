@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/cerberauth/harnessx"
@@ -13,6 +12,8 @@ import (
 	cobrareportx "github.com/cerberauth/x/cobrax/reportx"
 	"github.com/cerberauth/x/reportx/harnessreport"
 	"github.com/cerberauth/x/telemetryx"
+	"github.com/cerberauth/x/telemetryx/scanmetrics"
+	"github.com/getargvio/argvio-go"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
@@ -146,16 +147,18 @@ Use only against systems you own or have explicit written permission to test.`,
 			CheckDefs:   cache.CheckDefs(),
 		})
 
+		resourcesPerScan.Record(ctx, float64(len(resources)), resourceSource())
+
 		otelReporter, _ := reporters.NewOTelReporter(
 			ctx,
 			otel.Tracer(scanOtelName),
 			telemetryx.GetMeterProvider().Meter(scanOtelName),
 			reporters.WithPrefix("cache.scan"),
 		)
-
+		metricsReporter := scanmetrics.New(ctx, scanmetrics.Config{CheckDefs: cache.CheckDefs()})
 		summary, err := cache.ScanAll(ctx, target, cache.ScanOptions{
 			ProbeCtx:               pctx,
-			Reporters:              []harnessx.Reporter{otelReporter, reportxReporter},
+			Reporters:              []harnessx.Reporter{otelReporter, reportxReporter, metricsReporter},
 			MaxConcurrency:         scanMaxConcurrency,
 			MaxResourceConcurrency: scanMaxResourceConc,
 		})
@@ -168,10 +171,30 @@ Use only against systems you own or have explicit written permission to test.`,
 		}
 
 		if summary.Failed > 0 {
-			os.Exit(1)
+			telemetryx.Exit(cmd, 1)
 		}
 		return nil
 	},
+}
+
+// resourcesPerScan is how many resources each scan covers, by where they
+// came from (Argvio catalog).
+var resourcesPerScan = argvio.NewValue("scan.resources", argvio.WithUnit(argvio.UnitCount), argvio.Dims("source"))
+
+// resourceSource names the flag the scanned resources came from.
+func resourceSource() string {
+	switch {
+	case scanListFile != "":
+		return "list"
+	case scanSitemapURL != "":
+		return "sitemap"
+	case scanHARFile != "":
+		return "har"
+	case scanCrawl:
+		return "crawl"
+	default:
+		return "url"
+	}
 }
 
 func resolveResources(ctx context.Context) ([]checkbase.ResourceSpec, string, error) {

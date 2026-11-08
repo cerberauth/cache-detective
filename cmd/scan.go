@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/getargvio/argvio-go"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/time/rate"
 
 	cache "github.com/cerberauth/cache-detective/cache"
 	"github.com/cerberauth/cache-detective/cache/checkbase"
@@ -27,9 +29,12 @@ var (
 	scanListFile          string
 	scanSitemapURL        string
 	scanHARFile           string
+	scanHARReplay         bool
 	scanCrawl             bool
 	scanPathPrefix        string
 	scanMaxPages          int
+	scanCrawlDelay        time.Duration
+	scanRateLimit         float64
 	scanRespectRobots     bool
 	scanMethod            string
 	scanHeaders           []string
@@ -65,7 +70,7 @@ var scanCmd = &cobra.Command{
     cache key (Vary, query strings, cookies, custom headers)
 
 The resource list is resolved from exactly one of --url, --list, --sitemap,
---har, or --crawl.
+or --har (--crawl turns --url into a same-origin crawl start).
 
 Security-focused checks (cache poisoning / cache deception probing) are
 opt-in via --aggressive, since a positive result means the check just
@@ -112,7 +117,7 @@ Use only against systems you own or have explicit written permission to test.`,
 		}
 
 		pctx := checkbase.ProbeCtx{
-			Probe:                 probe.New(probe.WithMaxRetries(scanMaxRetries), probe.WithRetryDelay(scanRetryDelay), probe.WithTimeout(scanTimeout)),
+			Probe:                 probe.New(probeOptions()...),
 			Method:                scanMethod,
 			Headers:               parseHeaders(scanHeaders),
 			Cookies:               parseCookies(scanCookies),
@@ -198,20 +203,39 @@ func resourceSource() string {
 }
 
 func resolveResources(ctx context.Context) ([]checkbase.ResourceSpec, string, error) {
+	// --crawl is a mode of --url (the crawl's start page), not a separate
+	// source, so --url and --crawl together count as one.
 	set := 0
 	for _, v := range []string{scanURL, scanListFile, scanSitemapURL, scanHARFile} {
 		if v != "" {
 			set++
 		}
 	}
-	if scanCrawl {
-		set++
-	}
 	if set != 1 {
-		return nil, "", fmt.Errorf("exactly one of --url, --list, --sitemap, --har, --crawl must be set")
+		return nil, "", fmt.Errorf("exactly one of --url, --list, --sitemap, --har must be set")
+	}
+	if scanHARReplay && scanHARFile == "" {
+		return nil, "", fmt.Errorf("--har-replay-headers requires --har")
+	}
+	if scanCrawl && scanURL == "" {
+		return nil, "", fmt.Errorf("--crawl requires --url as the crawl's start page")
+	}
+	if scanMaxPages < 0 || scanCrawlDelay < 0 || scanRateLimit < 0 {
+		return nil, "", fmt.Errorf("--max-pages, --crawl-delay and --rate-limit must not be negative")
 	}
 
 	switch {
+	case scanCrawl:
+		found, err := crawl.Crawl(ctx, scanURL, crawl.Options{
+			Scope:         crawl.Scope{PathPrefix: scanPathPrefix},
+			MaxPages:      scanMaxPages,
+			RequestDelay:  scanCrawlDelay,
+			RespectRobots: scanRespectRobots,
+		})
+		if err != nil {
+			return nil, "", err
+		}
+		return crawl.FromURLs(found), scanURL, nil
 	case scanListFile != "":
 		specs, err := crawl.FromListFile(scanListFile)
 		if err != nil {
@@ -223,26 +247,33 @@ func resolveResources(ctx context.Context) ([]checkbase.ResourceSpec, string, er
 		if err != nil {
 			return nil, "", err
 		}
+		if scanPathPrefix != "" {
+			if specs, err = crawl.FilterScope(specs, scanSitemapURL, crawl.Scope{PathPrefix: scanPathPrefix}); err != nil {
+				return nil, "", err
+			}
+		}
 		return specs, scanSitemapURL, nil
 	case scanHARFile != "":
-		specs, err := crawl.FromHAR(scanHARFile)
+		specs, err := crawl.FromHAR(scanHARFile, crawl.HAROptions{ReplayRequestHeaders: scanHARReplay})
 		if err != nil {
 			return nil, "", err
 		}
 		return specs, scanHARFile, nil
-	case scanCrawl:
-		found, err := crawl.Crawl(ctx, scanURL, crawl.Options{
-			Scope:         crawl.Scope{PathPrefix: scanPathPrefix},
-			MaxPages:      scanMaxPages,
-			RespectRobots: scanRespectRobots,
-		})
-		if err != nil {
-			return nil, "", err
-		}
-		return crawl.FromURLs(found), scanURL, nil
 	default:
 		return []checkbase.ResourceSpec{{ID: "root", URL: scanURL}}, scanURL, nil
 	}
+}
+
+// probeOptions builds the shared probe's options, adding a global
+// requests-per-second limiter across all concurrent resources when
+// --rate-limit is set.
+func probeOptions() []probe.Option {
+	opts := []probe.Option{probe.WithMaxRetries(scanMaxRetries), probe.WithRetryDelay(scanRetryDelay), probe.WithTimeout(scanTimeout)}
+	if scanRateLimit > 0 {
+		burst := int(math.Ceil(scanRateLimit))
+		opts = append(opts, probe.WithRateLimiter(rate.NewLimiter(rate.Limit(scanRateLimit), burst)))
+	}
+	return opts
 }
 
 func parseHeaders(raw []string) map[string][]string {
@@ -283,9 +314,12 @@ func init() {
 	scanCmd.Flags().StringVar(&scanListFile, "list", "", "Path to a newline-delimited list of URLs")
 	scanCmd.Flags().StringVar(&scanSitemapURL, "sitemap", "", "URL of a sitemap.xml to scan")
 	scanCmd.Flags().StringVar(&scanHARFile, "har", "", "Path to a .har file to import GET/HEAD requests from")
+	scanCmd.Flags().BoolVar(&scanHARReplay, "har-replay-headers", false, "Replay each --har entry's recorded request headers and cookies (including any session tokens in the capture); explicit --header/--cookie/--bearer still override them by name")
 	scanCmd.Flags().BoolVar(&scanCrawl, "crawl", false, "Crawl same-origin links starting from --url instead of scanning it alone")
-	scanCmd.Flags().StringVar(&scanPathPrefix, "path-prefix", "", "Restrict --crawl to URLs under this path prefix")
+	scanCmd.Flags().StringVar(&scanPathPrefix, "path-prefix", "", "Restrict --crawl (and --sitemap) to URLs under this path prefix")
 	scanCmd.Flags().IntVar(&scanMaxPages, "max-pages", 50, "Maximum pages to discover with --crawl")
+	scanCmd.Flags().DurationVar(&scanCrawlDelay, "crawl-delay", 0, "Delay between page fetches during --crawl")
+	scanCmd.Flags().Float64Var(&scanRateLimit, "rate-limit", 0, "Maximum probe requests per second across all concurrent resources (0 = unlimited)")
 	scanCmd.Flags().BoolVar(&scanRespectRobots, "respect-robots", true, "Honor robots.txt Disallow rules for \"*\" during --crawl")
 	scanCmd.Flags().StringVar(&scanMethod, "method", "GET", "HTTP method to test")
 	scanCmd.Flags().StringArrayVar(&scanHeaders, "header", nil, "Custom request header \"Name=Value\" (repeatable)")

@@ -24,11 +24,7 @@ func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra htt
 		return nil, err
 	}
 
-	headers, cookies, bearer := pctx.Headers, pctx.Cookies, pctx.BearerToken
-	if profile, ok := pctx.AuthProfiles[requestOrigin(req.URL)]; ok {
-		headers, cookies, bearer = profile.Headers, profile.Cookies, profile.BearerToken
-	}
-
+	headers, cookies, bearer := resolveCredentials(req.URL, pctx)
 	for k, vs := range headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
@@ -52,6 +48,60 @@ func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra htt
 	return req, nil
 }
 
+// resolveCredentials returns the headers, cookies and bearer token a request
+// to u carries. Layers, lowest precedence first: headers/cookies recorded
+// for the matching resource (ResourceSpec.Headers/.Cookies, e.g. from a
+// .har import); then the scan-wide settings, or — replacing them — the
+// AuthProfiles entry for u's origin. A higher layer replaces a lower
+// layer's header (by canonical name) or cookie (by name) rather than
+// adding a duplicate.
+func resolveCredentials(u *url.URL, pctx *ProbeCtx) (map[string][]string, []Cookie, string) {
+	headers, cookies, bearer := pctx.Headers, pctx.Cookies, pctx.BearerToken
+	if profile, ok := pctx.AuthProfiles[requestOrigin(u)]; ok {
+		headers, cookies, bearer = profile.Headers, profile.Cookies, profile.BearerToken
+	}
+	spec := pctx.replay.lookup(u)
+	if spec == nil {
+		return headers, cookies, bearer
+	}
+
+	mergedHeaders := make(map[string][]string, len(spec.Headers)+len(headers))
+	for k, vs := range spec.Headers {
+		mergedHeaders[http.CanonicalHeaderKey(k)] = vs
+	}
+	for k, vs := range headers {
+		mergedHeaders[http.CanonicalHeaderKey(k)] = vs
+	}
+
+	override := make(map[string]bool, len(cookies))
+	for _, c := range cookies {
+		override[c.Name] = true
+	}
+	mergedCookies := make([]Cookie, 0, len(spec.Cookies)+len(cookies))
+	for _, c := range spec.Cookies {
+		if !override[c.Name] {
+			mergedCookies = append(mergedCookies, c)
+		}
+	}
+	mergedCookies = append(mergedCookies, cookies...)
+
+	if bearer != "" {
+		delete(mergedHeaders, "Authorization")
+	}
+	return mergedHeaders, mergedCookies, bearer
+}
+
+// EffectiveCookies returns the cookies a request to targetURL carries (see
+// resolveCredentials), for checks that vary or extend them.
+func EffectiveCookies(targetURL string, pctx *ProbeCtx) []Cookie {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return pctx.Cookies
+	}
+	_, cookies, _ := resolveCredentials(u, pctx)
+	return cookies
+}
+
 // requestOrigin returns u's scheme://host[:port], the key AuthProfiles is
 // looked up by.
 func requestOrigin(u *url.URL) string {
@@ -60,9 +110,9 @@ func requestOrigin(u *url.URL) string {
 
 // IsAuthenticated reports whether the request built by NewRequest for
 // targetURL carries credentials: either pctx.Authenticated (the global flag,
-// forced or derived from top-level BearerToken/Cookies) or a per-origin
-// AuthProfiles entry with its own bearer token or cookies, if targetURL's
-// origin has one.
+// forced or derived from top-level BearerToken/Cookies), a per-origin
+// AuthProfiles entry with its own bearer token or cookies, or recorded
+// cookies / an Authorization header replayed for the matching resource.
 func IsAuthenticated(targetURL string, pctx *ProbeCtx) bool {
 	if pctx.Authenticated {
 		return true
@@ -71,8 +121,16 @@ func IsAuthenticated(targetURL string, pctx *ProbeCtx) bool {
 	if err != nil {
 		return false
 	}
-	profile, ok := pctx.AuthProfiles[requestOrigin(u)]
-	return ok && (profile.BearerToken != "" || len(profile.Cookies) > 0)
+	headers, cookies, bearer := resolveCredentials(u, pctx)
+	if bearer != "" || len(cookies) > 0 {
+		return true
+	}
+	// A replayed credential header counts only when it came from a recorded
+	// resource; a bare scan-wide --header stays "not authenticated" as before.
+	if pctx.replay.lookup(u) != nil {
+		return len(headers["Authorization"]) > 0
+	}
+	return false
 }
 
 // Exchange is one probe request/response pair, reduced to what checks need:

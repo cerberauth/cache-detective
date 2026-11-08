@@ -103,6 +103,11 @@ type ProbeCtx struct {
 	// app-specific input names the bundled wordlist doesn't cover. Loaded
 	// from a file via LoadWordlistFile.
 	UnkeyedInputWordlist []string
+
+	// replay indexes the Resources that carry recorded Headers/Cookies.
+	// Built once by WithDefaults, read-only afterwards, so concurrent
+	// checks can share it.
+	replay *replayIndex
 }
 
 // AuthProfile is a set of credentials (headers, cookies, bearer token)
@@ -139,6 +144,15 @@ type ResourceSpec struct {
 	ID     string
 	URL    string
 	Method string
+
+	// Headers and Cookies are request headers/cookies recorded for this
+	// resource and replayed when probing it (e.g. imported from a .har
+	// file). They are the base layer: explicit scan-wide
+	// Headers/Cookies/BearerToken (and matching AuthProfiles) override them
+	// by name. Requests a check derives from the resource's URL (cache-buster
+	// variants, path-confusion variants) pick them up too — see replayFor.
+	Headers map[string][]string
+	Cookies []Cookie
 }
 
 // Cookie is a minimal, dependency-free stand-in for http.Cookie's fields
@@ -171,6 +185,7 @@ func (c ProbeCtx) WithDefaults() ProbeCtx {
 		c.Authenticated = true
 	}
 	c.CacheBuster = c.CacheBuster.withDefaults()
+	c.replay = newReplayIndex(c.Resources)
 	return c
 }
 

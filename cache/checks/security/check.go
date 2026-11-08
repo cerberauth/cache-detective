@@ -125,7 +125,7 @@ func runUnkeyedHeader(ctx context.Context, target harnessx.Target, resource harn
 			Name:     "cookie",
 			Wordlist: defaultCookieWordlist,
 			Apply: func(candidate string, busterProbe checkbase.CacheBusterProbe) (string, http.Header) {
-				cookieHeader := http.Header{"Cookie": {cookieHeaderValue(pctx.Cookies, candidate, unkeyedInputMarker)}}
+				cookieHeader := http.Header{"Cookie": {cookieHeaderValue(checkbase.EffectiveCookies(resource.URL, pctx), candidate, unkeyedInputMarker)}}
 				return busterProbe.URL, checkbase.MergeHeader(busterProbe.Header, cookieHeader)
 			},
 		},

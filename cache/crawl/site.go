@@ -119,6 +119,16 @@ func fetchAndExtractLinks(ctx context.Context, client *http.Client, pageURL stri
 	return text, links, nil
 }
 
+// pathInScope reports whether path is the prefix itself or under it as a
+// path segment, so "/blog" matches "/blog" and "/blog/x" but not "/blogger".
+func pathInScope(path, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	p := strings.TrimSuffix(prefix, "/")
+	return path == p || strings.HasPrefix(path, p+"/")
+}
+
 func resolveInScope(start *url.URL, ref string, scope Scope) (string, bool) {
 	u, err := url.Parse(ref)
 	if err != nil {
@@ -128,7 +138,7 @@ func resolveInScope(start *url.URL, ref string, scope Scope) (string, bool) {
 	if abs.Host != start.Host {
 		return "", false
 	}
-	if scope.PathPrefix != "" && !strings.HasPrefix(abs.Path, scope.PathPrefix) {
+	if !pathInScope(abs.Path, scope.PathPrefix) {
 		return "", false
 	}
 	abs.Fragment = ""

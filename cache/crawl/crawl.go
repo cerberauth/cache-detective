@@ -167,7 +167,7 @@ func fetchSitemapBody(ctx context.Context, client *http.Client, sitemapURL strin
 		return nil, fmt.Errorf("crawl: fetching sitemap %s: unexpected status %d", sitemapURL, resp.StatusCode)
 	}
 
-	var r io.Reader = resp.Body
+	var r io.Reader
 	br := bufio.NewReader(resp.Body)
 	// Sniff the gzip magic number rather than trusting the URL suffix or
 	// Content-Type: servers disagree on both for .xml.gz sitemaps.

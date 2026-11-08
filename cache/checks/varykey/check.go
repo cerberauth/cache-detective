@@ -125,7 +125,7 @@ func run(ctx context.Context, target harnessx.Target, resource harnessx.Resource
 	// once (rather than added via the generic `dimensions` header-overwrite
 	// path, which would replace rather than vary it) and compared against
 	// the same-cookie baseline response.
-	if budget > 0 && len(pctx.Cookies) > 0 {
+	if budget > 0 && len(checkbase.EffectiveCookies(resource.URL, pctx)) > 0 {
 		req, err := cookieProbeRequest(ctx, resource.URL, pctx)
 		if err == nil {
 			ex, err := checkbase.Do(ctx, pctx, req)
@@ -282,7 +282,7 @@ func cookieProbeRequest(ctx context.Context, url string, pctx *checkbase.ProbeCt
 		return nil, err
 	}
 	req.Header.Del("Cookie")
-	for _, c := range pctx.Cookies {
+	for _, c := range checkbase.EffectiveCookies(url, pctx) {
 		req.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value + "-cd-probe"}) //nolint:gosec // G124: outgoing probe cookie, not a response cookie
 	}
 	return req, nil

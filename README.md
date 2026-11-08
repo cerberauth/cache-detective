@@ -169,7 +169,7 @@ Commands:
   diff      Compare two JSON scans to detect cache-config drift
 ```
 
-The resource list for `scan` is resolved from exactly one of `--url`, `--list`, `--sitemap`, `--har`, or `--crawl`.
+The resource list for `scan` is resolved from exactly one of `--url`, `--list`, `--sitemap`, or `--har`; add `--crawl` to treat `--url` as the start page of a same-origin crawl.
 
 ### scan
 
@@ -180,17 +180,19 @@ Probes one or more URLs to determine:
 - how the fronting CDN/reverse proxy identifies itself and handles the cache key (`Vary`, query strings, cookies, custom headers)
 
 ```sh
-cache-detective scan (--url <url> | --list <file> | --sitemap <url> | --har <file> | --crawl) [flags]
+cache-detective scan (--url <url> [--crawl] | --list <file> | --sitemap <url> | --har <file>) [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--url` | Single target URL to scan |
 | `--list` | Path to a newline-delimited list of URLs |
-| `--sitemap` | URL of a sitemap.xml to scan |
-| `--har` | Path to a `.har` file to import GET/HEAD requests from |
+| `--sitemap` | URL of a sitemap.xml to scan (sitemap indexes and `.xml.gz` are followed/decompressed) |
+| `--har` | Path to a `.har` file to import GET/HEAD requests from (each replayed with its recorded method) |
 | `--crawl` | Crawl same-origin links starting from `--url` instead of scanning it alone |
-| `--path-prefix` | Restrict `--crawl` to URLs under this path prefix |
+| `--path-prefix` | Restrict `--crawl` (and `--sitemap`) to URLs under this path prefix |
+| `--har-replay-headers` | Replay each `--har` entry's recorded request headers and cookies (including any session tokens in the capture); `--header`/`--cookie`/`--bearer` override them by name. Off by default |
+| `--crawl-delay` | Delay between page fetches during `--crawl` (default `0`) |
 | `--max-pages` | Maximum pages to discover with `--crawl` (default `50`) |
 | `--respect-robots` | Honor `robots.txt` Disallow rules for `"*"` during `--crawl` (default `true`) |
 | `--method` | HTTP method to test (default `GET`) |
@@ -209,6 +211,7 @@ cache-detective scan (--url <url> | --list <file> | --sitemap <url> | --har <fil
 | `--cache-buster-param` | Query parameter name used in `query`/`both` cache-buster mode (default `cd_cachebuster`) |
 | `--cache-buster-header` | Request header name used in `header`/`both` cache-buster mode (default `X-Cache-Detective-Buster`) |
 | `--unkeyed-wordlist` | Path to a newline-delimited wordlist of extra candidate names to supplement the bundled header/cookie/query-parameter unkeyed-input mining wordlists |
+| `--rate-limit` | Maximum probe requests per second across all concurrent resources (default `0` = unlimited) |
 | `--max-concurrency` | Maximum concurrent checks (default: number of CPUs) |
 | `--max-resource-concurrency` | Maximum concurrent resources per check (default: number of CPUs) |
 | `--format` | Terminal display format |
@@ -229,6 +232,7 @@ cache-detective scan --url https://example.com/
 cache-detective scan --list urls.txt
 cache-detective scan --sitemap https://example.com/sitemap.xml
 cache-detective scan --har session.har
+cache-detective scan --har session.har --har-replay-headers   # also replay recorded headers/cookies
 
 # Same-origin crawl
 cache-detective scan --url https://example.com/ --crawl --path-prefix /blog

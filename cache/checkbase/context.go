@@ -3,6 +3,8 @@
 package checkbase
 
 import (
+	"context"
+	"net/http"
 	"time"
 
 	"github.com/cerberauth/harnessx"
@@ -29,6 +31,12 @@ type ProbeCtx struct {
 	// Probe is the harnessx/probe.Probe used for every outgoing request —
 	// carries retry, rate-limit compliance, and User-Agent injection.
 	Probe *probe.Probe
+
+	// NewRequest, when set, builds the base request of every probe in place
+	// of a bare request with Method, for an embedder that needs a body or
+	// its own request shape. Headers, credentials and the check's own
+	// headers are still applied on top.
+	NewRequest func(ctx context.Context, method, url string) (*http.Request, error)
 
 	// Method is the HTTP method to test. Defaults to GET.
 	Method string
@@ -194,60 +202,60 @@ const (
 	// check depends on, from ProbeCtx.Resources (the URL(s) supplied on the
 	// command line, a list file, a sitemap, a .har import, or a crawl —
 	// see the cache/crawl package).
-	CheckIDDiscovery harnessx.CheckID = "discovery"
+	CheckIDDiscovery harnessx.CheckID = "cache.discovery"
 	// CheckIDCacheability is the §1 cacheability-analysis check.
-	CheckIDCacheability harnessx.CheckID = "cacheability"
+	CheckIDCacheability harnessx.CheckID = "cache.cacheability"
 	// CheckIDLiveState is the §2 live cache-state-detection check.
-	CheckIDLiveState harnessx.CheckID = "live-state"
+	CheckIDLiveState harnessx.CheckID = "cache.live_state"
 	// CheckIDFingerprint is the §3 CDN/proxy fingerprinting check.
-	CheckIDFingerprint harnessx.CheckID = "fingerprint"
+	CheckIDFingerprint harnessx.CheckID = "cache.fingerprint"
 	// CheckIDVaryKey is the §4 cache-key & Vary analysis check.
-	CheckIDVaryKey harnessx.CheckID = "vary-key"
+	CheckIDVaryKey harnessx.CheckID = "cache.vary_key"
 	// CheckIDUnkeyedHeader is the §5 unkeyed-header-injection security check.
-	CheckIDUnkeyedHeader harnessx.CheckID = "unkeyed-header-injection"
+	CheckIDUnkeyedHeader harnessx.CheckID = "cache.unkeyed_header_injection"
 	// CheckIDCacheDeception is the §5 cache-deception path-confusion check.
-	CheckIDCacheDeception harnessx.CheckID = "cache-deception"
+	CheckIDCacheDeception harnessx.CheckID = "cache.cache_deception"
 	// CheckIDErrorCaching is the §5 error-response-caching check.
-	CheckIDErrorCaching harnessx.CheckID = "error-caching"
+	CheckIDErrorCaching harnessx.CheckID = "cache.error_caching"
 	// CheckIDResponseSplitting is the §5 response-splitting-via-cache-key
 	// manipulation check.
-	CheckIDResponseSplitting harnessx.CheckID = "response-splitting"
+	CheckIDResponseSplitting harnessx.CheckID = "cache.response_splitting"
 	// CheckIDCPDoS is the §5 Cache-Poisoned Denial-of-Service check (the
 	// 2019 CPDoS disclosure's HHO/HMC/HMO variants).
-	CheckIDCPDoS harnessx.CheckID = "cpdos"
+	CheckIDCPDoS harnessx.CheckID = "cache.cpdos"
 	// CheckIDDelimiterMapper is the §5 delimiter & path-normalization
 	// discrepancy mapper (Doyhenard, "Gotta cache 'em all", Black Hat USA
 	// 2024): the characters the origin treats as a path delimiter but a cache
 	// keys on verbatim, and whether the origin collapses dot-segment traversal.
-	CheckIDDelimiterMapper harnessx.CheckID = "delimiter-mapper"
+	CheckIDDelimiterMapper harnessx.CheckID = "cache.delimiter_mapper"
 	// CheckIDEntanglement is the §5 web-cache-entanglement check (Kettle, "Web
 	// Cache Entanglement", 2020): request inputs the origin reads but the
 	// cache key ignores — a GET request body ("fat GET") and a ";"-cloaked
 	// query parameter.
-	CheckIDEntanglement harnessx.CheckID = "cache-entanglement"
+	CheckIDEntanglement harnessx.CheckID = "cache.cache_entanglement"
 	// CheckIDNormalizationDeception is the §5 static-directory /
 	// nested-encoding path-normalization deception check (Doyhenard, "Gotta
 	// cache 'em all", Black Hat USA 2024).
-	CheckIDNormalizationDeception harnessx.CheckID = "normalization-deception"
+	CheckIDNormalizationDeception harnessx.CheckID = "cache.normalization_deception"
 	// CheckIDKeyCollision is the §5 cache-key collision check: a cache that
 	// normalizes "../" before keying while the origin routes the raw path
 	// (Doyhenard, 2024), letting one request overwrite another path's entry.
-	CheckIDKeyCollision harnessx.CheckID = "key-collision"
+	CheckIDKeyCollision harnessx.CheckID = "cache.key_collision"
 	// CheckIDKeyExplosion is the §5 cache-key cardinality check: whether the
 	// cache keeps a separate entry per distinct value of an arbitrary query
 	// parameter, with no cap.
-	CheckIDKeyExplosion harnessx.CheckID = "key-explosion"
+	CheckIDKeyExplosion harnessx.CheckID = "cache.key_explosion"
 	// CheckIDConsistency is the §6 response-consistency & correctness check.
-	CheckIDConsistency harnessx.CheckID = "consistency"
+	CheckIDConsistency harnessx.CheckID = "cache.consistency"
 	// CheckIDStaleServing is the §9 stale-while-revalidate/stale-if-error
 	// behavior check (RFC 5861).
-	CheckIDStaleServing harnessx.CheckID = "stale-serving"
+	CheckIDStaleServing harnessx.CheckID = "cache.stale_serving"
 	// CheckIDAuthCacheable is the security-relevant "authenticated response
 	// marked cacheable" misconfiguration check, split out from
 	// CheckIDCacheability so it can carry its own CVSS/CWE severity.
-	CheckIDAuthCacheable harnessx.CheckID = "authenticated-cacheable"
+	CheckIDAuthCacheable harnessx.CheckID = "cache.authenticated_cacheable"
 	// CheckIDSessionCacheable is the "cacheable response sets a cookie"
 	// misconfiguration check — the unauthenticated-request counterpart of
 	// CheckIDAuthCacheable, for responses that mint a session/CSRF cookie.
-	CheckIDSessionCacheable harnessx.CheckID = "session-cacheable"
+	CheckIDSessionCacheable harnessx.CheckID = "cache.session_cacheable"
 )

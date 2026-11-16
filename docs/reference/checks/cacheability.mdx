@@ -30,7 +30,7 @@ Analyzes a single response's headers to determine whether it's cacheable per [RF
 
 ## Authenticated response marked cacheable
 
-This is the one security-relevant finding in this area, and it's reported as its own check (`authenticated-cacheable`, CWE-524, CVSS 8.1) so it carries real severity metadata distinct from the informational findings above. Per [RFC 9111 §3.5](https://www.rfc-editor.org/rfc/rfc9111#section-3.5), a shared cache must not store a response to a request carrying `Authorization` unless the response itself explicitly opts back in. The finding fires when:
+This is the one security-relevant finding in this area, and it's reported as its own check (`cache.authenticated_cacheable`, CWE-524, CVSS 8.1) so it carries real severity metadata distinct from the informational findings above. Per [RFC 9111 §3.5](https://www.rfc-editor.org/rfc/rfc9111#section-3.5), a shared cache must not store a response to a request carrying `Authorization` unless the response itself explicitly opts back in. The finding fires when:
 
 - `--bearer` or `--cookie` was set (or the check's own auth-scoped request otherwise marks itself authenticated), **and**
 - the response is cacheable, **and**

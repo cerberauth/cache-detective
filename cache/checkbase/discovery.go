@@ -12,9 +12,10 @@ import (
 // ahead of the scan in the CLI layer / cache/crawl package; DiscoveryCheck
 // just publishes ProbeCtx.Resources into the harnessx resource pool.
 var DiscoveryCheck = harnessx.Check{
-	ID:    CheckIDDiscovery,
-	Name:  "Resource Discovery",
-	Scope: harnessx.ScopeGlobal,
+	ID:       CheckIDDiscovery,
+	Name:     "Resource Discovery",
+	Internal: true,
+	Scope:    harnessx.ScopeGlobal,
 	Run: func(_ context.Context, target harnessx.Target, _ harnessx.ResultStore) (harnessx.Result, error) {
 		pctx := target.Data.(*ProbeCtx)
 		resources := make([]harnessx.Resource, 0, len(pctx.Resources))

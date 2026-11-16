@@ -19,7 +19,15 @@ func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra htt
 	if method == "" {
 		method = http.MethodGet
 	}
-	req, err := http.NewRequestWithContext(ctx, method, targetURL, nil)
+	var (
+		req *http.Request
+		err error
+	)
+	if pctx.NewRequest != nil {
+		req, err = pctx.NewRequest(ctx, method, targetURL)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, method, targetURL, nil)
+	}
 	if err != nil {
 		return nil, err
 	}

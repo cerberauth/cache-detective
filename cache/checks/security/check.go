@@ -693,35 +693,83 @@ func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, res
 	}, true
 }
 
+// cpdosOverrideHeaders are the method-override header names different
+// frameworks/origins honor — Rails/Sinatra-style "X-HTTP-Method-Override",
+// the older "X-Method-Override" some Java/Ruby stacks accept, and
+// "X-HTTP-Method" used by a handful of others — tried in turn since which
+// one (if any) an origin actually honors isn't knowable up front.
+var cpdosOverrideHeaders = []string{"X-HTTP-Method-Override", "X-Method-Override", "X-HTTP-Method"}
+
+// cpdosOverrideMethods are the methods tried via each override header: all
+// three are typically blocked/unimplemented on a read-only GET endpoint,
+// making an origin error (and the cache poisoned from it) likely.
+var cpdosOverrideMethods = []string{"DELETE", "PUT", "PATCH"}
+
+// cpdosRFC9110CacheableStatuses are the error statuses RFC 9110 §15.1
+// actually gives default cache semantics to (404, 405, 410, 501 — mirroring
+// cacheability.StatusDefaultCacheable's error-status subset). A cache
+// storing one of these is conforming, if still risky when a method-override
+// header is what produced it.
+var cpdosRFC9110CacheableStatuses = map[int]bool{404: true, 405: true, 410: true, 501: true}
+
+// cpdosOverCachedStatuses are statuses RFC 9110 gives *no* default cache
+// semantics to, that real-world CDNs have nonetheless been observed to
+// cache (the original CPDoS disclosure's examples): a cache storing one of
+// these isn't just replaying an HMO-induced error, it's doing so for a
+// status it was never supposed to treat as cacheable at all.
+var cpdosOverCachedStatuses = map[int]bool{400: true, 403: true, 500: true}
+
 // probeCPDoSMethodOverride implements CPDoS's "HTTP Method Override" (HMO)
 // variant: a header letting the origin re-interpret a GET as another
 // method, invisibly to the cache which keys purely on the real method/line.
+// Tries every header/method combination in cpdosOverrideHeaders ×
+// cpdosOverrideMethods in turn until budget runs out or one is confirmed
+// poisoned.
 func probeCPDoSMethodOverride(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, budget *int) (harnessx.Observation, bool) {
-	*budget -= 2
-	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
-	if err != nil {
-		return harnessx.Observation{}, false
-	}
-	poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{"X-HTTP-Method-Override": {"DELETE"}}))
-	if err != nil {
-		return harnessx.Observation{}, false
-	}
-	poisoned, err := checkbase.Do(ctx, pctx, poisonReq)
-	if err != nil || poisoned.StatusCode < 400 {
-		return harnessx.Observation{}, false
-	}
+	for _, header := range cpdosOverrideHeaders {
+		for _, method := range cpdosOverrideMethods {
+			if *budget < 2 {
+				return harnessx.Observation{}, false
+			}
+			*budget -= 2
 
-	if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
-		return harnessx.Observation{}, false
+			busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+			if err != nil {
+				continue
+			}
+			poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{header: {method}}))
+			if err != nil {
+				continue
+			}
+			poisoned, err := checkbase.Do(ctx, pctx, poisonReq)
+			if err != nil || poisoned.StatusCode < 400 {
+				continue
+			}
+
+			if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
+				continue
+			}
+
+			severity := checkbase.SeverityHigh
+			classification := fmt.Sprintf("RFC 9110 §15.1 gives status %d default cache semantics on its own, so a conforming cache storing it is expected behavior — the risk here is specifically that a method-override header, not the real GET, is what produced it", poisoned.StatusCode)
+			if cpdosOverCachedStatuses[poisoned.StatusCode] {
+				severity = checkbase.SeverityCritical
+				classification = fmt.Sprintf("RFC 9110 §15.1 gives status %d no default cache semantics at all, yet the cache stored and replayed it anyway — a CDN known to over-cache statuses it was never supposed to treat as cacheable", poisoned.StatusCode)
+			} else if !cpdosRFC9110CacheableStatuses[poisoned.StatusCode] {
+				classification = fmt.Sprintf("status %d isn't one of RFC 9110 §15.1's cacheable-by-default error statuses (404/405/410/501) or a status CDNs are commonly known to over-cache (400/403/500); the cache stored it regardless", poisoned.StatusCode)
+			}
+
+			return harnessx.Observation{
+				CheckID:     checkbase.CheckIDCPDoS,
+				ResourceID:  resource.ID,
+				Title:       "CPDoS via method override (HMO)",
+				Description: fmt.Sprintf("a GET carrying %s: %s honored by the origin provoked a %d error, and a follow-up plain GET received the same error — the cache keyed on the real GET method/line, unaware the override header changed how the origin handled it. %s", header, method, poisoned.StatusCode, classification),
+				Evidence:    fmt.Sprintf("status=%d after %s: %s, then again on an unmodified follow-up GET", poisoned.StatusCode, header, method),
+				Metadata:    map[string]string{checkbase.SeverityKey: severity},
+			}, true
+		}
 	}
-	return harnessx.Observation{
-		CheckID:     checkbase.CheckIDCPDoS,
-		ResourceID:  resource.ID,
-		Title:       "CPDoS via method override (HMO)",
-		Description: fmt.Sprintf("a GET carrying X-HTTP-Method-Override honored by the origin provoked a %d error, and a follow-up plain GET received the same error — the cache keyed on the real GET method/line, unaware the override header changed how the origin handled it", poisoned.StatusCode),
-		Evidence:    fmt.Sprintf("status=%d after X-HTTP-Method-Override: DELETE, then again on an unmodified follow-up GET", poisoned.StatusCode),
-		Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityHigh},
-	}, true
+	return harnessx.Observation{}, false
 }
 
 // cpdosMetaCharacterNames labels cpdosMetaCharacters for findings/evidence,

@@ -326,9 +326,24 @@ cache-detective's job is inherently multi-URL (a single URL, a list, a sitemap, 
 
 - **Every check is `harnessx.ScopePerResource`**, fed by `checkbase.DiscoveryCheck` publishing the resolved URL list as `harnessx.Resource`s. Concurrent multi-URL probing and rate limiting come for free from harnessx's existing per-resource concurrency (`Check.Concurrency` / `WithMaxResourceConcurrency`) rather than a bespoke worker pool.
 - **Resolving the resource list (§7) happens before `Engine.Run`**, in the `cache/crawl` package, instead of as a `harnessx.Check` — this keeps the dependency graph flat (every check just depends on `discovery`) and keeps crawl-specific courtesy concerns (`robots.txt`, scope rules) in one place instead of re-solved inside the check DAG.
-- **Findings are split across multiple `CheckID`s by severity**, rather than one check emitting observations of mixed severity. harnessx/reportx score a finding from its *check's* `CVSSScore` (set once on `CheckDef`), not per-observation — so, e.g., cacheability's informational findings (conflicting directives, missing validators) live on the `cacheability` check with no CVSS, while the "authenticated response marked cacheable" misconfiguration is its own `authenticated-cacheable` check with real CVSS/CWE/OWASP metadata. Each `Observation.Metadata["severity"]` still carries an advisory severity hint for tooling that reads it directly.
+- **Findings are split across multiple `CheckID`s by severity**, rather than one check emitting observations of mixed severity. harnessx/reportx score a finding from its *check's* `CVSSScore` (set once on `CheckDef`), not per-observation — so, e.g., cacheability's informational findings (conflicting directives, missing validators) live on the `cache.cacheability` check with no CVSS, while the "authenticated response marked cacheable" misconfiguration is its own `cache.authenticated_cacheable` check with real CVSS/CWE/OWASP metadata. Each `Observation.Metadata["severity"]` still carries an advisory severity hint for tooling that reads it directly.
 
 ---
+
+### Embedding the checks
+
+`cache.Checks()` is cache-detective's [harnessx check pack](https://github.com/cerberauth/harnessx/blob/main/docs/guides/check-packs.mdx): `cache.*` IDs, an internal `cache.discovery`, findings reported as observations, and every request built through the `ProbeCtx` (its `Probe`, credentials and optional `NewRequest` factory). Register it in another harnessx engine with `harnessx/embed`, building the pack context with `cache.NewProbeCtx`:
+
+```go
+pack, _ := embed.Select(cache.Checks(), checkbase.CheckIDAuthCacheable)
+checks, err := embed.Checks(pack, embed.Options{
+    Scope:  harnessx.ScopeGlobal,
+    Prefix: "proxy.",
+    Context: func(context.Context, harnessx.Target, *harnessx.Resource) (any, error) {
+        return cache.NewProbeCtx(checkbase.ProbeCtx{Probe: p, BearerToken: token}), nil
+    },
+})
+```
 
 ## Testing
 

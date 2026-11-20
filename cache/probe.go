@@ -84,6 +84,22 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 	return checks, defs
 }
 
+// NewProbeCtx returns the pack context every cache-detective check reads from
+// Target.Data: opts with defaults applied.
+func NewProbeCtx(opts ProbeCtx) *ProbeCtx {
+	pctx := opts.WithDefaults()
+	return &pctx
+}
+
+// Checks returns the cache-detective check pack: every check with a `cache.`
+// ID, resource discovery marked internal and findings reported as
+// Observations, for embedding in another harnessx engine with harnessx/embed.
+// Each check reads a *ProbeCtx built by NewProbeCtx from Target.Data.
+func Checks() []harnessx.Check {
+	checks, _ := BuildChecks()
+	return checks
+}
+
 // CheckDefs returns per-check metadata (name, CVSS, CWE, OWASP, link,
 // description) keyed by CheckID, for callers that need to enrich results
 // outside of ScanAll (e.g. a harnessx.Reporter).
@@ -118,9 +134,7 @@ type ScanOptions struct {
 // ScanAll registers every check via BuildChecks and runs them against the
 // resources in opts.ProbeCtx.Resources, returning the harnessx.ScanSummary.
 func ScanAll(ctx context.Context, target string, opts ScanOptions) (harnessx.ScanSummary, error) {
-	pctx := opts.ProbeCtx.WithDefaults()
-
-	checks, _ := BuildChecks()
+	pctx := NewProbeCtx(opts.ProbeCtx)
 
 	var engineOpts []harnessx.Option
 	if len(opts.Reporters) > 0 {
@@ -134,9 +148,9 @@ func ScanAll(ctx context.Context, target string, opts ScanOptions) (harnessx.Sca
 	}
 
 	engine := harnessx.New(engineOpts...)
-	if err := engine.Register(checks...); err != nil {
+	if err := engine.Register(Checks()...); err != nil {
 		return harnessx.ScanSummary{}, fmt.Errorf("cache: registering checks: %w", err)
 	}
 
-	return engine.Run(ctx, harnessx.Target{URL: target, Data: &pctx}, opts.RunOptions...)
+	return engine.Run(ctx, harnessx.Target{URL: target, Data: pctx}, opts.RunOptions...)
 }

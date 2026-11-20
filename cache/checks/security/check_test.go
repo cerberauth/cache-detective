@@ -454,6 +454,8 @@ func TestCPDoSCheck_DetectsMethodOverridePoisoning(t *testing.T) {
 // Meta Character" (HMC) pattern: the cache keys purely on the path, while
 // the origin inspects an existing query value.
 func TestCPDoSCheck_DetectsMetaCharacterPoisoning(t *testing.T) {
+	defer security.SetCPDoSTTLWindowForTest(time.Millisecond)()
+
 	var mu sync.Mutex
 	var cachedStatus int
 
@@ -487,6 +489,98 @@ func TestCPDoSCheck_DetectsMetaCharacterPoisoning(t *testing.T) {
 	require.True(t, ok)
 	require.NotEmpty(t, res.Observations)
 	assert.Equal(t, "CPDoS via HTTP meta-character (HMC)", res.Observations[0].Title)
+}
+
+// TestCPDoSCheck_TriesEveryMetaCharacterUntilOneProvokesAnError simulates an
+// origin that only rejects a carriage return, not a NUL byte — the HMC
+// variant must keep trying cpdosMetaCharacters past the first one instead
+// of giving up after it fails to provoke an error.
+func TestCPDoSCheck_TriesEveryMetaCharacterUntilOneProvokesAnError(t *testing.T) {
+	defer security.SetCPDoSTTLWindowForTest(time.Millisecond)()
+
+	var mu sync.Mutex
+	var cachedStatus int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if cachedStatus != 0 {
+			w.WriteHeader(cachedStatus)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		if strings.ContainsRune(r.URL.Query().Get("name"), '\r') {
+			mu.Lock()
+			cachedStatus = http.StatusBadRequest
+			mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL + "/?name=cache-detective"}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, "CPDoS via HTTP meta-character (HMC)", res.Observations[0].Title)
+	assert.Contains(t, res.Observations[0].Evidence, "CR")
+}
+
+// TestCPDoSCheck_DoesNotReportMetaCharacterThatExpiresBeforeTTLWindow
+// simulates a poisoned error that's gone again by the time the HMC probe's
+// delayed re-check lands, and checks that it's not reported as a finding.
+func TestCPDoSCheck_DoesNotReportMetaCharacterThatExpiresBeforeTTLWindow(t *testing.T) {
+	defer security.SetCPDoSTTLWindowForTest(time.Millisecond)()
+
+	var mu sync.Mutex
+	var cachedStatus int
+	var served bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		switch {
+		case cachedStatus != 0 && !served:
+			served = true
+			status := cachedStatus
+			mu.Unlock()
+			w.WriteHeader(status)
+			return
+		case cachedStatus != 0 && served:
+			cachedStatus = 0
+			mu.Unlock()
+			w.Write([]byte("welcome"))
+			return
+		}
+		mu.Unlock()
+
+		if strings.ContainsRune(r.URL.Query().Get("name"), 0) {
+			mu.Lock()
+			cachedStatus = http.StatusBadRequest
+			mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL + "/?name=cache-detective"}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	assert.Empty(t, res.Observations)
 }
 
 // TestCacheDeceptionCheck_DetectsDelimiterConfusion simulates web cache

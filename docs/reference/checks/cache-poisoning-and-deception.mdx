@@ -96,6 +96,16 @@ The baseline R0 is fetched at the resource's own URL, so the check runs after th
 | Cache normalizes encoded/plain traversal before applying cache rules | info | CWE-524 |
 | Cache path-normalization order not observable | info | CWE-524 |
 
+## Delimiter-based cache deception
+
+Reuses the per-origin `cdn.DiscoveredQuirks` record built by the delimiter mapper above: for each delimiter already *confirmed* origin-only for this target (not a blind guess list), probes `<dynamic-path><delimiter><static-looking-suffix>` — in both the delimiter's encoded form (`;` → `%3B`) and its decoded one (`%00` → the raw byte), since a cache and origin disagreeing on delimiters can just as easily disagree on which encoding "is" the same character. Runs after the delimiter mapper (so there's something to confirm) and the classic-WCD check, for the same same-level-race reasons the rest of the §5 chain documents.
+
+Same sensitivity gating as classic web cache deception: a match is only reported once the content it would store is confirmed private (credentials carried, or a PII/token/session marker in the body), escalating to critical when both hold.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Cache deception via confirmed origin delimiter | medium–critical | CWE-524 |
+
 ## Static-directory path-traversal deception
 
 Requests the resource through a path that *starts* under a static directory and climbs back out — `/static/<rand>/../../account` — and checks whether the origin still serves the resource and the response then gets cached. A cache that applies its "cache everything under `/static/`" rule to the raw path caches the origin's dynamic response under a URL anyone can request. Three spellings are tried, because caches and origins disagree on *when* they decode:

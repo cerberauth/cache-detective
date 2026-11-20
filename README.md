@@ -41,6 +41,7 @@
 | Wordlist-driven unkeyed-input mining (headers, cookies, query parameters), custom wordlist support | `--aggressive` |
 | Cache deception (path confusion / static-extension / delimiter) probing | `--aggressive` |
 | Delimiter & path-normalization discrepancy mapping (origin-only and cache-only delimiters, dot-segment traversal, cache-side normalization order) | `--aggressive` |
+| Delimiter-based cache deception (confirmed origin-only delimiters + static-looking suffix, encoded and unencoded forms) | `--aggressive` |
 | Web cache entanglement (fat GET request bodies, `;`-cloaked query parameters) | `--aggressive` |
 | Static-directory path-traversal cache deception (plain, encoded, and nested-encoded `../`) | `--aggressive` |
 | Cache-key path collision (cache normalizes `../` before keying, origin routes the raw path) | `--aggressive` |
@@ -307,7 +308,7 @@ Each numbered section below is one `harnessx.Check` (or a small family of them),
 | 2 | `cache/checks/livestate` | Multi-request HIT/MISS/STALE/EXPIRED/BYPASS detection via the CDN registry, with a timing/Age heuristic fallback |
 | 3 | `cache/checks/fingerprint` | CNAME chain resolution + Server/Via matching (via the CDN registry) + multi-tier cache evidence |
 | 4 | `cache/checks/varykey` | Declared-`Vary` vs. observed cache-key inclusion for Accept-Encoding/Accept-Language/User-Agent/a custom header |
-| 5 | `cache/checks/security` | Unkeyed-input mining (headers / cookies / query parameters, wordlist-driven), cache deception (path confusion / static-extension / delimiter), delimiter & path-normalization discrepancy mapping (baseline/suffix/insert probe for origin-only path delimiters, the reverse cache-only probe, and encoded/plain dot-segment traversal with a measured cache-side normalization order, recorded per-origin in `cdn.DiscoveredQuirks`), error-response caching, response splitting, CPDoS (header oversize / method override / meta-character) — all `--aggressive`-gated |
+| 5 | `cache/checks/security` | Unkeyed-input mining (headers / cookies / query parameters, wordlist-driven), cache deception (path confusion / static-extension / delimiter), delimiter & path-normalization discrepancy mapping (baseline/suffix/insert probe for origin-only path delimiters, the reverse cache-only probe, and encoded/plain dot-segment traversal with a measured cache-side normalization order, recorded per-origin in `cdn.DiscoveredQuirks`), delimiter-based cache deception (reuses that per-origin `cdn.DiscoveredQuirks` record to probe only *confirmed* origin-only delimiters, in both encoded and unencoded form, instead of a blind guess list), error-response caching, response splitting, CPDoS (header oversize / method override / meta-character) — all `--aggressive`-gated |
 | 6 | `cache/checks/consistency` | Conditional-request (304) validation, redirect caching |
 | 7 | `cache/crawl` | URL list / sitemap / `.har` import / same-origin crawl with scope + `robots.txt` courtesy, resolved **before** the engine runs |
 | 8 | `cache/geo` | `Provider` interface + `NoopProvider` for future multi-region probing — no real geo backend ships in v1 |

@@ -228,6 +228,13 @@ const (
 	// 2024): the characters the origin treats as a path delimiter but a cache
 	// keys on verbatim, and whether the origin collapses dot-segment traversal.
 	CheckIDDelimiterMapper harnessx.CheckID = "cache.delimiter_mapper"
+	// CheckIDDelimiterDeception is the §5 delimiter-based cache deception
+	// check: for each origin-only path delimiter CheckIDDelimiterMapper
+	// confirmed for the target (Doyhenard 2024; PortSwigger Academy WCD
+	// labs), tests the dynamic/authenticated path followed by that
+	// delimiter and a static-looking suffix, in both its encoded and
+	// unencoded forms.
+	CheckIDDelimiterDeception harnessx.CheckID = "cache.delimiter_deception"
 	// CheckIDEntanglement is the §5 web-cache-entanglement check (Kettle, "Web
 	// Cache Entanglement", 2020): request inputs the origin reads but the
 	// cache key ignores — a GET request body ("fat GET") and a ";"-cloaked

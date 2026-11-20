@@ -154,7 +154,7 @@ This check depends on the unkeyed-header-injection check completing first (rathe
 
 Reproduces the three variants from the original 2019 [CPDoS](https://cpdos.org/) disclosure (see the [CDN registry](./cdn-fingerprinting/#beyond-fingerprinting-static-extensions-cache-key-notes-and-quirks)'s `cpdos-2019` Quirk) against the live target, each as a poison-then-confirm pair: provoke an origin error, then check whether a follow-up **plain** request is served that same error back — meaning it was cached and is now being replayed to ordinary callers, not a one-off response to the probe itself.
 
-- **HTTP Header Oversize (HHO)** — an oversized header block a fronting cache accepts but the origin's own, smaller limit rejects.
+- **HTTP Header Oversize (HHO)** — an oversized header block a fronting cache accepts but the origin's own, smaller limit rejects. Reported only when the poisoned error is still being served a couple of seconds later, not just on the immediate follow-up request — a trivially short-lived cache entry has no realistic chance of reaching anyone but the probe itself.
 - **HTTP Method Override (HMO)** — an `X-HTTP-Method-Override: DELETE` header the origin honors (re-interpreting the request) but the cache ignores, keying purely on the real `GET` line.
 - **HTTP Meta Character (HMC)** — a control character injected into an *existing* query parameter's value, rejected by the origin's input validation while the cache keys on the path alone. Needs a resource with at least one query parameter to mutate; a bare path has no surface for this variant and is silently skipped.
 

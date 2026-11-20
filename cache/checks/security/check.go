@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/cerberauth/harnessx"
 	"github.com/cerberauth/harnessx/checkdef"
@@ -582,17 +583,24 @@ func runCPDoS(ctx context.Context, target harnessx.Target, resource harnessx.Res
 	budget := pctx.MaxAggressiveRequests
 
 	var obs []harnessx.Observation
-	probes := []func(context.Context, *checkbase.ProbeCtx, harnessx.Resource) (harnessx.Observation, bool){
-		probeCPDoSHeaderOversize,
-		probeCPDoSMethodOverride,
-		probeCPDoSMetaCharacter,
+	// cost is each variant's own request budget: HHO spends one extra
+	// request beyond poison+confirm to re-check the poisoned error after
+	// cpdosTTLWindow (see probeCPDoSHeaderOversize), so it needs 3; the
+	// others still just poison once and confirm once.
+	probes := []struct {
+		fn   func(context.Context, *checkbase.ProbeCtx, harnessx.Resource) (harnessx.Observation, bool)
+		cost int
+	}{
+		{probeCPDoSHeaderOversize, 3},
+		{probeCPDoSMethodOverride, 2},
+		{probeCPDoSMetaCharacter, 2},
 	}
 	for _, probe := range probes {
-		if budget < 2 {
+		if budget < probe.cost {
 			break
 		}
-		budget -= 2
-		ob, found := probe(ctx, pctx, resource)
+		budget -= probe.cost
+		ob, found := probe.fn(ctx, pctx, resource)
 		if !found {
 			continue
 		}
@@ -629,6 +637,31 @@ func cpdosConfirm(ctx context.Context, pctx *checkbase.ProbeCtx, bustedURL strin
 	return confirm.StatusCode == poisonedStatus
 }
 
+// cpdosTTLWindow is how long cpdosConfirmPersists waits between its
+// immediate confirm and its delayed re-check. CPDoS's actual impact is a
+// shared cache replaying a planted error to *other* callers for however
+// long that entry lives; an error gone again within a couple of seconds
+// never has a realistic chance to reach anyone but the probe itself, so
+// it's not worth reporting as impact. A var, not a const, so tests can
+// shrink it instead of spending real wall-clock time on every run.
+var cpdosTTLWindow = 2 * time.Second
+
+// cpdosConfirmPersists is cpdosConfirm plus a delayed second check: it
+// reports true only when the poisoned error is still being served after
+// cpdosTTLWindow has elapsed, not just on an immediate follow-up request —
+// so a trivially short-lived cache entry isn't mistaken for a real finding.
+func cpdosConfirmPersists(ctx context.Context, pctx *checkbase.ProbeCtx, bustedURL string, busterHeader http.Header, poisonedStatus int) bool {
+	if !cpdosConfirm(ctx, pctx, bustedURL, busterHeader, poisonedStatus) {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(cpdosTTLWindow):
+	}
+	return cpdosConfirm(ctx, pctx, bustedURL, busterHeader, poisonedStatus)
+}
+
 // probeCPDoSHeaderOversize implements CPDoS's "HTTP Header Oversize" (HHO)
 // variant: a header block a fronting cache accepts but the origin doesn't.
 func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource) (harnessx.Observation, bool) {
@@ -645,15 +678,15 @@ func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, res
 		return harnessx.Observation{}, false
 	}
 
-	if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
+	if !cpdosConfirmPersists(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
 		return harnessx.Observation{}, false
 	}
 	return harnessx.Observation{
 		CheckID:     checkbase.CheckIDCPDoS,
 		ResourceID:  resource.ID,
 		Title:       "CPDoS via oversized headers (HHO)",
-		Description: fmt.Sprintf("an oversized header block provoked a %d origin error, and a follow-up plain request without that header received the same error — a shared cache accepting a larger header block than the origin is caching and replaying that error to every caller", poisoned.StatusCode),
-		Evidence:    fmt.Sprintf("status=%d after an oversized header, then again on an unmodified follow-up request", poisoned.StatusCode),
+		Description: fmt.Sprintf("an oversized header block (sized between a typical origin's own header-block limit and a typical CDN's more generous one) provoked a %d origin error, and the same error was still being served %s later to a follow-up plain request without that header — a shared cache accepting a larger header block than the origin is caching and replaying that error to every caller for longer than a trivial window", poisoned.StatusCode, cpdosTTLWindow),
+		Evidence:    fmt.Sprintf("status=%d after an oversized header, confirmed again %s later on an unmodified follow-up request", poisoned.StatusCode, cpdosTTLWindow),
 		Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityHigh},
 	}, true
 }

@@ -41,6 +41,10 @@ type ProbeCtx struct {
 	// Method is the HTTP method to test. Defaults to GET.
 	Method string
 
+	// Body is sent with every probe request. Ignored when NewRequest is set,
+	// which owns the request body.
+	Body []byte
+
 	// Headers are additional request headers sent with every probe request
 	// (e.g. custom cache-key inputs to test, or app-specific auth headers).
 	Headers map[string][]string

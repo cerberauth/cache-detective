@@ -14,6 +14,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/cerberauth/harnessx"
 
@@ -93,7 +94,118 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDUnkeyedImpact:          security.UnkeyedImpactDef,
 		checkbase.CheckIDURLParserDiscrepancy:   security.URLParserDiscrepancyDef,
 	}
+	for i := range checks {
+		checks[i] = tagMode(withResourceRequest(checks[i]))
+	}
+	for id, def := range defs {
+		def.Tags = append(slices.Clone(def.Tags), modeTag(harnessx.CheckID(def.ID)))
+		defs[id] = def
+	}
 	return checks, defs
+}
+
+// Tags telling a read-only check from one that can pollute a shared cache,
+// so a host selects either set by tag instead of by ID.
+const (
+	TagPassive    = "passive"
+	TagAggressive = "aggressive"
+)
+
+// aggressiveChecks are the checks that send cache-poisoning/deception probes
+// and so only run under ProbeCtx.Aggressive (smuggling additionally needs
+// ProbeCtx.EnableSmuggling). Every other check is read-only.
+var aggressiveChecks = map[harnessx.CheckID]bool{
+	checkbase.CheckIDUnkeyedHeader:          true,
+	checkbase.CheckIDCacheDeception:         true,
+	checkbase.CheckIDErrorCaching:           true,
+	checkbase.CheckIDResponseSplitting:      true,
+	checkbase.CheckIDCPDoS:                  true,
+	checkbase.CheckIDDelimiterMapper:        true,
+	checkbase.CheckIDDelimiterDeception:     true,
+	checkbase.CheckIDEntanglement:           true,
+	checkbase.CheckIDNormalizationDeception: true,
+	checkbase.CheckIDKeyCollision:           true,
+	checkbase.CheckIDKeyExplosion:           true,
+	checkbase.CheckIDSmuggling:              true,
+	checkbase.CheckIDUnkeyedImpact:          true,
+	checkbase.CheckIDURLParserDiscrepancy:   true,
+}
+
+func modeTag(id harnessx.CheckID) string {
+	if aggressiveChecks[id] {
+		return TagAggressive
+	}
+	return TagPassive
+}
+
+func tagMode(c harnessx.Check) harnessx.Check {
+	if c.Internal {
+		return c
+	}
+	c.Tags = append(slices.Clone(c.Tags), modeTag(c.ID))
+	return c
+}
+
+// withResourceRequest makes a per-resource check probe with the request shape
+// of the resource it runs on (see checkbase.ResourceRequest) instead of only
+// the scan-wide one, so a host engine supplying its own resources controls
+// each resource's method, headers, cookies and body.
+func withResourceRequest(c harnessx.Check) harnessx.Check {
+	if run := c.RunResource; run != nil {
+		c.RunResource = func(ctx context.Context, target harnessx.Target, res harnessx.Resource, store harnessx.ResultStore) (harnessx.Result, error) {
+			return run(ctx, forResource(target, res), res, store)
+		}
+	}
+	if run := c.RunResourceVariant; run != nil {
+		c.RunResourceVariant = func(ctx context.Context, target harnessx.Target, res harnessx.Resource, variant string, store harnessx.ResultStore) (harnessx.Result, error) {
+			return run(ctx, forResource(target, res), res, variant, store)
+		}
+	}
+	return c
+}
+
+func forResource(target harnessx.Target, res harnessx.Resource) harnessx.Target {
+	if pctx, ok := target.Data.(*checkbase.ProbeCtx); ok {
+		target.Data = checkbase.ForResource(pctx, res)
+	}
+	return target
+}
+
+// legacyCheckIDs maps the un-prefixed check IDs used before the pack
+// contract to their `cache.` IDs.
+var legacyCheckIDs = map[string]harnessx.CheckID{
+	"discovery":                checkbase.CheckIDDiscovery,
+	"cacheability":             checkbase.CheckIDCacheability,
+	"live-state":               checkbase.CheckIDLiveState,
+	"fingerprint":              checkbase.CheckIDFingerprint,
+	"vary-key":                 checkbase.CheckIDVaryKey,
+	"unkeyed-header-injection": checkbase.CheckIDUnkeyedHeader,
+	"cache-deception":          checkbase.CheckIDCacheDeception,
+	"error-caching":            checkbase.CheckIDErrorCaching,
+	"response-splitting":       checkbase.CheckIDResponseSplitting,
+	"cpdos":                    checkbase.CheckIDCPDoS,
+	"delimiter-mapper":         checkbase.CheckIDDelimiterMapper,
+	"cache-entanglement":       checkbase.CheckIDEntanglement,
+	"normalization-deception":  checkbase.CheckIDNormalizationDeception,
+	"key-collision":            checkbase.CheckIDKeyCollision,
+	"key-explosion":            checkbase.CheckIDKeyExplosion,
+	"consistency":              checkbase.CheckIDConsistency,
+	"stale-serving":            checkbase.CheckIDStaleServing,
+	"authenticated-cacheable":  checkbase.CheckIDAuthCacheable,
+	"session-cacheable":        checkbase.CheckIDSessionCacheable,
+}
+
+// ResolveCheckID returns the pack check ID id names: a `cache.` ID as is, or
+// a legacy un-prefixed ID (`authenticated-cacheable`) mapped to its `cache.`
+// ID. It reports false for an ID that names no check.
+func ResolveCheckID(id string) (harnessx.CheckID, bool) {
+	if cid, ok := legacyCheckIDs[id]; ok {
+		return cid, true
+	}
+	cid := harnessx.CheckID(id)
+	_, defs := BuildChecks()
+	_, ok := defs[cid]
+	return cid, ok
 }
 
 // NewProbeCtx returns the pack context every cache-detective check reads from

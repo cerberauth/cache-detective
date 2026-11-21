@@ -270,3 +270,39 @@ func findResult(summary harnessx.ScanSummary, id harnessx.CheckID, resourceID st
 	}
 	return harnessx.Result{}, false
 }
+
+func TestCheck_AuthenticatedCacheControlTable(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		cacheControl string
+		flagged      bool
+	}{
+		{"max-age only", "max-age=600", true},
+		{"no Cache-Control", "", true},
+		{"private", "private, max-age=600", false},
+		{"no-store", "no-store", false},
+		{"no-cache", "no-cache", false},
+		{"no-cache with max-age", "no-cache, max-age=600", false},
+		{"public", "public, max-age=600", false},
+		{"must-revalidate", "max-age=600, must-revalidate", false},
+		{"s-maxage", "s-maxage=600", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.cacheControl != "" {
+					w.Header().Set("Cache-Control", tc.cacheControl)
+				}
+				w.Header().Set("ETag", `"v1"`)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			pctx := (&checkbase.ProbeCtx{Probe: probe.New(), BearerToken: "secret-token"}).WithDefaults()
+			summary := runChecks(t, &pctx, srv.URL)
+
+			res, ok := findResult(summary, checkbase.CheckIDAuthCacheable, "root")
+			require.True(t, ok)
+			assert.Equal(t, tc.flagged, len(res.Observations) == 1, "Cache-Control %q", tc.cacheControl)
+		})
+	}
+}

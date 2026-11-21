@@ -1,7 +1,9 @@
 package checkbase
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -26,7 +28,11 @@ func NewRequest(ctx context.Context, targetURL string, pctx *ProbeCtx, extra htt
 	if pctx.NewRequest != nil {
 		req, err = pctx.NewRequest(ctx, method, targetURL)
 	} else {
-		req, err = http.NewRequestWithContext(ctx, method, targetURL, nil)
+		var body io.Reader
+		if pctx.Body != nil {
+			body = bytes.NewReader(pctx.Body)
+		}
+		req, err = http.NewRequestWithContext(ctx, method, targetURL, body)
 	}
 	if err != nil {
 		return nil, err

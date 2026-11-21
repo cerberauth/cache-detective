@@ -49,6 +49,7 @@ var (
 	scanStaleWindowWait   time.Duration
 	scanAggressive        bool
 	scanMaxAggressive     int
+	scanEnableSmuggling   bool
 	scanCacheBusterMode   string
 	scanCacheBusterParam  string
 	scanCacheBusterHeader string
@@ -81,6 +82,11 @@ aggressive check isolates its poison/confirm request pairs from the
 resource's real, canonical cache entry with a per-attempt cache-buster
 (--cache-buster-mode/--cache-buster-param/--cache-buster-header), so testing
 doesn't poison real users.
+
+The request-smuggling/desync probe is gated a second time, behind
+--enable-smuggling on top of --aggressive: it opens its own raw connections
+and sends requests a conforming server should reject, so even under
+--aggressive it stays off by default.
 
 Use only against systems you own or have explicit written permission to test.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -129,6 +135,7 @@ Use only against systems you own or have explicit written permission to test.`,
 			StaleWindowMaxWait:    scanStaleWindowWait,
 			Aggressive:            scanAggressive,
 			MaxAggressiveRequests: scanMaxAggressive,
+			EnableSmuggling:       scanEnableSmuggling,
 			CacheBuster: checkbase.CacheBusterConfig{
 				Mode:       checkbase.CacheBusterMode(scanCacheBusterMode),
 				QueryParam: scanCacheBusterParam,
@@ -334,6 +341,7 @@ func init() {
 	scanCmd.Flags().DurationVar(&scanStaleWindowWait, "stale-window-max-wait", 30*time.Second, "Maximum time to wait for a resource to enter its declared stale-while-revalidate window before giving up on actively confirming it")
 	scanCmd.Flags().BoolVar(&scanAggressive, "aggressive", false, "Enable cache poisoning/deception probing (§5) — opt-in since it intentionally probes for exploitable cache behavior")
 	scanCmd.Flags().IntVar(&scanMaxAggressive, "max-aggressive-requests", 10, "Hard cap on extra probe requests per resource for --aggressive checks (and the read-only vary-key check); the cache-key-explosion check needs at least 21")
+	scanCmd.Flags().BoolVar(&scanEnableSmuggling, "enable-smuggling", false, "Additionally enable the request-smuggling/desync probe (requires --aggressive too) — higher blast-radius than the rest of §5: it opens raw connections and deliberately sends requests a conforming server should reject, watching for a hung backend")
 	scanCmd.Flags().StringVar(&scanCacheBusterMode, "cache-buster-mode", "query", "How --aggressive checks isolate poison/confirm requests from the resource's real cache entry: \"query\", \"header\", or \"both\"")
 	scanCmd.Flags().StringVar(&scanCacheBusterParam, "cache-buster-param", "cd_cachebuster", "Query parameter name used in \"query\"/\"both\" cache-buster mode")
 	scanCmd.Flags().StringVar(&scanCacheBusterHeader, "cache-buster-header", "X-Cache-Detective-Buster", "Request header name used in \"header\"/\"both\" cache-buster mode")

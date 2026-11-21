@@ -79,6 +79,17 @@ type ProbeCtx struct {
 	// true, so a misconfigured check can't run away against a live target.
 	MaxAggressiveRequests int
 
+	// EnableSmuggling additionally gates the request-smuggling/desync probe
+	// (Kettle, "HTTP Desync Attacks", 2019) beyond Aggressive. That probe
+	// opens its own raw TCP/TLS connections outside the normal cache-buster
+	// framework and deliberately sends a request a conforming server should
+	// reject — a positive result means it just left a connection hanging,
+	// a meaningfully higher blast radius than every other §5 check (which
+	// confirm a clean HTTP exchange was poisoned, not leave a connection in
+	// an ambiguous state). Both Aggressive and EnableSmuggling must be true
+	// for it to run, so it stays off by default even under --aggressive.
+	EnableSmuggling bool
+
 	// Resources is the resolved list of URLs to probe. DiscoveryCheck turns
 	// this into the harnessx.Resource list every per-resource check runs
 	// against.
@@ -274,4 +285,11 @@ const (
 	// misconfiguration rather than a confirmed live HIT or an
 	// unauthenticated response.
 	CheckIDInfoDisclosure harnessx.CheckID = "cache.info_disclosure"
+
+	// CheckIDSmuggling is the optional §5 request-smuggling/desync check
+	// (Kettle, "HTTP Desync Attacks", 2019): CL.TE/TE.CL/TE.TE differential
+	// timing probes, plus HTTP/2-downgrade and client-side-desync
+	// precondition advisories. Gated behind both Aggressive and
+	// EnableSmuggling.
+	CheckIDSmuggling harnessx.CheckID = "cache.smuggling_desync"
 )

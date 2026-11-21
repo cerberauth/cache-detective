@@ -20,6 +20,7 @@ import (
 	"github.com/cerberauth/cache-detective/cache/checkbase"
 	"github.com/cerberauth/cache-detective/cache/checks/cacheability"
 	"github.com/cerberauth/cache-detective/cache/checks/consistency"
+	"github.com/cerberauth/cache-detective/cache/checks/disclosure"
 	"github.com/cerberauth/cache-detective/cache/checks/fingerprint"
 	"github.com/cerberauth/cache-detective/cache/checks/livestate"
 	"github.com/cerberauth/cache-detective/cache/checks/security"
@@ -45,6 +46,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		cacheability.AuthCheck,
 		cacheability.SessionCheck,
 		livestate.Check,
+		disclosure.Check,
 		fingerprint.Check,
 		varykey.Check,
 		consistency.Check,
@@ -67,6 +69,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDAuthCacheable:          cacheability.AuthDef,
 		checkbase.CheckIDSessionCacheable:       cacheability.SessionDef,
 		checkbase.CheckIDLiveState:              livestate.Def,
+		checkbase.CheckIDInfoDisclosure:         disclosure.Def,
 		checkbase.CheckIDFingerprint:            fingerprint.Def,
 		checkbase.CheckIDVaryKey:                varykey.Def,
 		checkbase.CheckIDConsistency:            consistency.Def,

@@ -265,4 +265,13 @@ const (
 	// misconfiguration check — the unauthenticated-request counterpart of
 	// CheckIDAuthCacheable, for responses that mint a session/CSRF cookie.
 	CheckIDSessionCacheable harnessx.CheckID = "cache.session_cacheable"
+	// CheckIDInfoDisclosure is the cache-based information disclosure sweep:
+	// a broad, non-aggressive pass across every crawled resource for
+	// personalized/authenticated content that's actually been observed as
+	// a live cache HIT, and for PII/token-bearing JSON responses missing
+	// the OWASP WSTG-ATHN-06 no-store/no-cache guidance — distinct from
+	// AuthDef/SessionDef, which flag a *declared* cacheability
+	// misconfiguration rather than a confirmed live HIT or an
+	// unauthenticated response.
+	CheckIDInfoDisclosure harnessx.CheckID = "cache.info_disclosure"
 )

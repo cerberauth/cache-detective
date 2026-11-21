@@ -450,6 +450,88 @@ func TestCPDoSCheck_DetectsMethodOverridePoisoning(t *testing.T) {
 	assert.Equal(t, "CPDoS via method override (HMO)", res.Observations[0].Title)
 }
 
+// TestCPDoSCheck_TriesEveryMethodOverrideCombination simulates an origin
+// that only honors "X-Method-Override: PATCH" — none of the combinations
+// tried before it in cpdosOverrideHeaders/cpdosOverrideMethods — and checks
+// that the HMO probe keeps trying until it finds the one that works.
+func TestCPDoSCheck_TriesEveryMethodOverrideCombination(t *testing.T) {
+	var mu sync.Mutex
+	var cachedStatus int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if cachedStatus != 0 {
+			w.WriteHeader(cachedStatus)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		if r.Header.Get("X-Method-Override") == "PATCH" {
+			mu.Lock()
+			cachedStatus = http.StatusMethodNotAllowed
+			mu.Unlock()
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 50}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, "CPDoS via method override (HMO)", res.Observations[0].Title)
+	assert.Contains(t, res.Observations[0].Evidence, "X-Method-Override: PATCH")
+}
+
+// TestCPDoSCheck_EscalatesSeverityForOverCachedStatus simulates an origin
+// that answers a method-override with a 500 — a status RFC 9110 §15.1
+// gives no default cache semantics to at all, unlike 404/405/410/501 — and
+// checks that the finding escalates to critical, per RFC 9110's
+// actually-cacheable error codes vs. CDNs known to over-cache others.
+func TestCPDoSCheck_EscalatesSeverityForOverCachedStatus(t *testing.T) {
+	var mu sync.Mutex
+	var cachedStatus int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if cachedStatus != 0 {
+			w.WriteHeader(cachedStatus)
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
+
+		if r.Header.Get("X-HTTP-Method-Override") == "DELETE" {
+			mu.Lock()
+			cachedStatus = http.StatusInternalServerError
+			mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, checkbase.SeverityCritical, res.Observations[0].Metadata[checkbase.SeverityKey])
+}
+
 // TestCPDoSCheck_DetectsMetaCharacterPoisoning simulates the CPDoS "HTTP
 // Meta Character" (HMC) pattern: the cache keys purely on the path, while
 // the origin inspects an existing query value.
@@ -479,7 +561,11 @@ func TestCPDoSCheck_DetectsMetaCharacterPoisoning(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	// 40, not the default 10: the HMO probe now tries every
+	// cpdosOverrideHeaders x cpdosOverrideMethods combination before giving
+	// up on an origin that doesn't honor any of them, which on its own can
+	// spend most of a small budget before the HMC probe below ever runs.
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 40}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL + "/?name=cache-detective"}}
 
 	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
@@ -521,7 +607,9 @@ func TestCPDoSCheck_TriesEveryMetaCharacterUntilOneProvokesAnError(t *testing.T)
 	}))
 	defer srv.Close()
 
-	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	// 40, not the default 10: see the comment on the HMC test above — the HMO
+	// matrix runs first and can spend most of a small budget.
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 40}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL + "/?name=cache-detective"}}
 
 	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})

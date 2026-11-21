@@ -216,7 +216,11 @@ func TestCacheDeceptionCheck_DetectsPathConfusion(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	// A bearer token, so the probed request is actually authenticated — the
+	// finding is reported only once the content it would store is
+	// confirmed private (credentials carried, or PII/token markers in the
+	// body), not just because a path happens to look like "/account".
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10, BearerToken: "test-session-token"}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "account", URL: srv.URL + "/account"}}
 
 	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck)
@@ -227,6 +231,53 @@ func TestCacheDeceptionCheck_DetectsPathConfusion(t *testing.T) {
 	require.True(t, ok)
 	require.NotEmpty(t, res.Observations)
 	assert.Equal(t, "Cache deception via path confusion", res.Observations[0].Title)
+}
+
+// TestCacheDeceptionCheck_DoesNotReportGenericPublicContent simulates a
+// deceptive path confusion against a plain, unauthenticated, non-sensitive
+// response — a cache matching the original response here isn't a
+// vulnerability on its own, since anyone could already reach that content.
+func TestCacheDeceptionCheck_DoesNotReportGenericPublicContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Write([]byte("welcome to our public homepage"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "home", URL: srv.URL + "/home"}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck)
+	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCacheDeception, "home")
+	require.True(t, ok)
+	assert.Empty(t, res.Observations)
+}
+
+// TestCacheDeceptionCheck_EscalatesSeverityForSensitiveContent simulates an
+// unauthenticated request whose deceived response nonetheless carries an
+// explicit PII marker in the body — the content itself proves it's
+// sensitive even without carried credentials, so it's still reported.
+func TestCacheDeceptionCheck_EscalatesSeverityForSensitiveContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Write([]byte(`{"email": "user@example.com"}`))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "profile", URL: srv.URL + "/profile"}}
+
+	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck)
+	summary, err := engine.Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCacheDeception, "profile")
+	require.True(t, ok)
+	require.NotEmpty(t, res.Observations)
+	assert.Equal(t, checkbase.SeverityHigh, res.Observations[0].Metadata[checkbase.SeverityKey])
 }
 
 func TestErrorCachingCheck_FlagsCacheableError(t *testing.T) {
@@ -682,7 +733,7 @@ func TestCacheDeceptionCheck_DetectsDelimiterConfusion(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10, BearerToken: "test-session-token"}).WithDefaults()
 	pctx.Resources = []checkbase.ResourceSpec{{ID: "account", URL: srv.URL + "/account"}}
 
 	engine := newEngine(t, security.UnkeyedHeaderCheck, security.CacheDeceptionCheck)

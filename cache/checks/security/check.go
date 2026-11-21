@@ -260,6 +260,14 @@ func withExtraQueryParam(rawURL, key, value string) string {
 	return u.String()
 }
 
+// joinReasons renders DetectSensitiveData's matched reasons into a single
+// evidence/description fragment. A local copy of cacheability's own
+// unexported helper of the same name/shape, kept here rather than exported
+// across package boundaries for one call site.
+func joinReasons(reasons []string) string {
+	return strings.Join(reasons, ", ")
+}
+
 func containsHeaderValue(h http.Header, marker string) bool {
 	for _, vs := range h {
 		for _, v := range vs {
@@ -357,13 +365,35 @@ func runCacheDeception(ctx context.Context, target harnessx.Target, resource har
 		}
 
 		if sameResponse(base, ex) && cacheableResponse(ex.Method, ex.StatusCode, ex.Header) {
+			// A generic/public response still matching after the suffix just
+			// shows the origin ignores it — not a vulnerability on its own.
+			// This is "cache stores private content", distinct from
+			// poisoning, so only report it once the content it would store
+			// is actually private: the request carried credentials, or the
+			// body/Set-Cookie itself carries PII/token/session material.
+			reasons := cacheability.DetectSensitiveData(base.Body, base.Header.Values("Set-Cookie"))
+			authenticated := checkbase.IsAuthenticated(resource.URL, pctx)
+			if !authenticated && len(reasons) == 0 {
+				continue
+			}
+
+			severity := checkbase.SeverityMedium
+			sensitivity := "the request carried credentials (bearer token or cookie), so the stored response is tied to that session even without an obvious PII/token marker in the body"
+			if len(reasons) > 0 {
+				severity = checkbase.SeverityHigh
+				sensitivity = "the response carries " + joinReasons(reasons)
+			}
+			if authenticated && len(reasons) > 0 {
+				severity = checkbase.SeverityCritical
+			}
+
 			obs = append(obs, harnessx.Observation{
 				CheckID:     checkbase.CheckIDCacheDeception,
 				ResourceID:  resource.ID,
 				Title:       "Cache deception via path confusion",
-				Description: fmt.Sprintf("appending %q to the resource path still served the original (identical) response body, and that response looks cacheable — a static-extension/path-confusion cache-deception surface if the original response carried sensitive/authenticated content", suffix),
+				Description: fmt.Sprintf("appending %q to the resource path still served the original (identical) response body, and that response looks cacheable — a static-extension/path-confusion cache-deception surface: %s, not a generic page anyone could already reach", suffix, sensitivity),
 				Evidence:    "probed: " + deceptiveURL,
-				Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityHigh},
+				Metadata:    map[string]string{checkbase.SeverityKey: severity},
 			})
 		}
 	}

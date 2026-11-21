@@ -53,9 +53,11 @@ Appends a static-file extension or a nonexistent sub-path (`/nonexistent.js`, `.
 
 The static extensions probed come from the [CDN registry](./cdn-fingerprinting/#beyond-fingerprinting-static-extensions-cache-key-notes-and-quirks)'s `StaticExtensions` field (`cdn.AllStaticExtensions`) — every extension any registered CDN caches by default, deduplicated. The check also tries a handful of origin-only path delimiters (`;`, `%00`, `%0a`, `$`) ahead of the plain suffixes: some caches decide cacheability from whatever static-looking suffix follows one of these characters, while the origin ignores the delimiter and keeps routing on the full path — a distinct mechanism from a bare static extension, documented by PortSwigger's ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all) research. For a systematic sweep of *which* delimiters a target's origin and cache disagree on, see [Delimiter & normalization mapping](#delimiter--normalization-mapping) below.
 
+A match is only reported once the content it would store is confirmed private — the probed request carried credentials (bearer token or cookie), or the response body/`Set-Cookie` itself carries a PII/token/session marker — not for a generic public page that just happens to still answer under the confused path; this is "the cache stores private content", reported distinctly from poisoning ("the cache serves injected content"). Severity escalates to critical when both hold at once.
+
 | Finding | Severity | CWE |
 |---|---|---|
-| Cache deception via path confusion | high | CWE-524 |
+| Cache deception via path confusion | medium–critical | CWE-524 |
 
 ## Delimiter & normalization mapping
 

@@ -1,0 +1,44 @@
+---
+title: Request smuggling / desync
+description: Optional, higher-blast-radius CL.TE/TE.CL/TE.TE and desync probes.
+sidebar:
+  order: 9
+---
+
+import { Aside } from '@/components/docs';
+
+<Aside type="caution">
+  This module runs only with `--aggressive` **and** `--enable-smuggling` together — a higher bar than every other check on the [cache poisoning & deception](../cache-poisoning-and-deception/) page. Every other `--aggressive` check confirms a clean poison/confirm exchange; a positive result here only demonstrates a hung connection via timing, which carries meaningfully higher blast radius. Only run this against systems you own or have explicit written permission to test.
+</Aside>
+
+## CL.TE / TE.CL / TE.TE differential timing probes
+
+A measured baseline (one plain, well-formed request through the normal probe client) is compared against a handful of requests sent over their own fresh raw TCP/TLS connection, each carrying a Content-Length and Transfer-Encoding header that disagree about where the request body ends (Kettle, ["HTTP Desync Attacks"](https://portswigger.net/research/http-desync-attacks), 2019):
+
+- **CL.TE** — `Content-Length: 6` alongside `Transfer-Encoding: chunked`, with a 6-byte body (`0\r\n\r\nX`) that a chunked reader sees as complete after only 5 of those bytes, leaving a trailing `X` it reads as the start of a second, pipelined request.
+- **TE.CL** — the mirror: `Content-Length: 3` alongside a chunked body a Content-Length reader stops consuming after only 3 bytes, leaving the rest of the chunked body to be misread as a second request.
+- **TE.TE** — the same CL.TE shape, repeated with a handful of header spellings (`Transfer-Encoding: xchunked`, a space before the colon, a duplicate header, a tab-prefixed header) that some implementations still treat as real chunked encoding while others reject or ignore it.
+
+A party left waiting on a request line that never arrives doesn't answer — from the outside, that's a response that either takes far longer than the baseline or never arrives inside the probe's read window at all. Either is reported as a timing signal, not a destructive confirmation: a WAF or rate-limiter that deliberately slows malformed requests can produce the same symptom, so treat a finding here as a strong lead to confirm manually.
+
+The check stops at the first confirmed delay for a given resource — on a genuinely vulnerable connection, the backend is left mid-request until it idles out, so running further variants would likely just observe that same residual hang.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Possible request smuggling (`<variant>` timing) | high | CWE-444 |
+
+## HTTP/2-downgrade precondition
+
+Crafting a genuinely malformed HTTP/2 frame to smuggle past a downgrading front-end needs a raw frame-level HTTP/2 client this scanner doesn't carry — RFC 9113 already forbids a compliant server from honoring Content-Length/Transfer-Encoding games over H2 itself, so the actual exposure is in how a front-end *translates* H2 to H1 for its origin. What's checked instead is the shared precondition: does the target negotiate HTTP/2 over TLS at all? If so, it's flagged as an advisory lead for manual testing (Kettle, ["HTTP/2: The Sequel is Always Worse"](https://portswigger.net/research/http2); ["Browser-Powered Desync Attacks"](https://portswigger.net/research/browser-powered-desync-attacks), 2022) — never a confirmed finding.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| HTTP/2-downgrade desync precondition | info | CWE-444 |
+
+## Client-side desync (CSD) precondition
+
+CSD is fundamentally client-side: a victim's *browser* reuses a connection for its next same-origin request and prepends a server's own leftover response bytes onto it. That isn't something a server-side scanner can trigger by itself, so this checks the one precondition observable from the server side alone: a kept-alive redirect response whose actual bytes on the wire exceed its own declared `Content-Length` — the shape an application framework's "short HTML body in case the client doesn't follow the redirect" bug produces (Kettle, ["Browser-Powered Desync Attacks"](https://portswigger.net/research/browser-powered-desync-attacks), 2022).
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Client-side desync (CSD) precondition | info | CWE-444 |

@@ -24,6 +24,7 @@ import (
 	"github.com/cerberauth/cache-detective/cache/checks/fingerprint"
 	"github.com/cerberauth/cache-detective/cache/checks/livestate"
 	"github.com/cerberauth/cache-detective/cache/checks/security"
+	"github.com/cerberauth/cache-detective/cache/checks/smuggling"
 	"github.com/cerberauth/cache-detective/cache/checks/staleserving"
 	"github.com/cerberauth/cache-detective/cache/checks/varykey"
 )
@@ -62,6 +63,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		security.NormalizationDeceptionCheck,
 		security.KeyCollisionCheck,
 		security.KeyExplosionCheck,
+		smuggling.Check,
 	}
 
 	defs := map[harnessx.CheckID]checkbase.CheckDef{
@@ -85,6 +87,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDNormalizationDeception: security.NormalizationDeceptionDef,
 		checkbase.CheckIDKeyCollision:           security.KeyCollisionDef,
 		checkbase.CheckIDKeyExplosion:           security.KeyExplosionDef,
+		checkbase.CheckIDSmuggling:              smuggling.Def,
 	}
 	return checks, defs
 }

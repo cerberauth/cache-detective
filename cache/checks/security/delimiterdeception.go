@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/cerberauth/harnessx"
 	"github.com/cerberauth/harnessx/checkdef"
@@ -13,14 +12,6 @@ import (
 	"github.com/cerberauth/cache-detective/cache/checkbase"
 	"github.com/cerberauth/cache-detective/cache/checks/cacheability"
 )
-
-// joinReasons renders DetectSensitiveData's matched reasons into a single
-// evidence/description fragment. A local copy of cacheability's own
-// unexported helper of the same name/shape, kept here rather than exported
-// across package boundaries for one call site.
-func joinReasons(reasons []string) string {
-	return strings.Join(reasons, ", ")
-}
 
 // --- Delimiter-based cache deception (§5) ----------------------------------
 

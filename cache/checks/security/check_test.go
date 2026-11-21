@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cerberauth/harnessx"
 	"github.com/cerberauth/harnessx/probe"
@@ -309,6 +310,8 @@ func TestCPDoSCheck_GatedOffWithoutAggressive(t *testing.T) {
 // header block, fronted by a single-slot cache that stores and replays
 // that error to every subsequent caller of the path.
 func TestCPDoSCheck_DetectsHeaderOversizePoisoning(t *testing.T) {
+	defer security.SetCPDoSTTLWindowForTest(time.Millisecond)()
+
 	var mu sync.Mutex
 	var cachedStatus int
 
@@ -348,6 +351,65 @@ func TestCPDoSCheck_DetectsHeaderOversizePoisoning(t *testing.T) {
 	require.True(t, ok)
 	require.NotEmpty(t, res.Observations)
 	assert.Equal(t, "CPDoS via oversized headers (HHO)", res.Observations[0].Title)
+}
+
+// TestCPDoSCheck_DoesNotReportHeaderOversizeThatExpiresBeforeTTLWindow
+// simulates a poisoned error that's gone again by the time
+// cpdosConfirmPersists's delayed re-check lands — a cache entry evicted
+// almost immediately, with no realistic chance of reaching another caller —
+// and checks that it's not reported as a finding.
+func TestCPDoSCheck_DoesNotReportHeaderOversizeThatExpiresBeforeTTLWindow(t *testing.T) {
+	defer security.SetCPDoSTTLWindowForTest(time.Millisecond)()
+
+	var mu sync.Mutex
+	var cachedStatus int
+	var served bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		switch {
+		case cachedStatus != 0 && !served:
+			// The immediate confirm request: the entry is still there.
+			served = true
+			status := cachedStatus
+			mu.Unlock()
+			w.WriteHeader(status)
+			return
+		case cachedStatus != 0 && served:
+			// The delayed re-check: the entry has already been evicted.
+			cachedStatus = 0
+			mu.Unlock()
+			w.Write([]byte("welcome"))
+			return
+		}
+		mu.Unlock()
+
+		size := 0
+		for name, values := range r.Header {
+			for _, v := range values {
+				size += len(name) + len(v)
+			}
+		}
+		if size > 8192 {
+			mu.Lock()
+			cachedStatus = http.StatusRequestHeaderFieldsTooLarge
+			mu.Unlock()
+			w.WriteHeader(http.StatusRequestHeaderFieldsTooLarge)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 10}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	assert.Empty(t, res.Observations)
 }
 
 // TestCPDoSCheck_DetectsMethodOverridePoisoning simulates the CPDoS "HTTP

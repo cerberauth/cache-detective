@@ -64,6 +64,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		security.KeyCollisionCheck,
 		security.KeyExplosionCheck,
 		smuggling.Check,
+		security.UnkeyedImpactCheck,
 	}
 
 	defs := map[harnessx.CheckID]checkbase.CheckDef{
@@ -88,6 +89,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDKeyCollision:           security.KeyCollisionDef,
 		checkbase.CheckIDKeyExplosion:           security.KeyExplosionDef,
 		checkbase.CheckIDSmuggling:              smuggling.Def,
+		checkbase.CheckIDUnkeyedImpact:          security.UnkeyedImpactDef,
 	}
 	return checks, defs
 }

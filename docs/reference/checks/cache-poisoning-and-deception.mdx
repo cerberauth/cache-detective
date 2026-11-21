@@ -33,6 +33,22 @@ Each surface mines its own bundled default wordlist, in this order:
 | Unkeyed cookie injection via `<cookie>` | critical | CWE-444 |
 | Unkeyed query parameter injection via `<param>` | critical | CWE-444 |
 
+## Unkeyed-input exploitation impact
+
+Goes a step past unkeyed input mining's "this value comes back unmodified": for the headers an origin commonly uses to build its own idea of the request's hostname (`X-Forwarded-Host`, `X-Forwarded-Server`, `X-Host`, `X-Original-URL`, `X-Rewrite-URL`), each payload is crafted to demonstrate one specific, concrete exploitation outcome rather than mere reflection — the same confirmation method (a follow-up plain request to the same cache-buster-isolated URL must still carry the payload) proves the shared cache, not just the live render, serves it to other callers. Four impact classes, all with real-world precedent from Kettle's ["Practical Web Cache Poisoning"](https://portswigger.net/research/practical-web-cache-poisoning) (2018):
+
+- **Reflected XSS** — a payload that breaks out of an attribute context; only counts if it reaches the response unescaped (Red Hat's homepage, via `X-Forwarded-Host` reflected into an absolute URL).
+- **DOM-based poisoning** — a payload that breaks out of a JS string literal, landing unescaped inside an inline `<script>` block (data.gov, an i18n JSON config consumed by inline JS).
+- **Script/resource-import hijack** — a bare attacker-controlled host reflected into a `src=` attribute (unity3d.com, via `X-Host`).
+- **Open redirect** — `X-Forwarded-Host` combined with `X-Forwarded-Proto`/`X-Forwarded-Scheme` producing a `Location` under attacker control (goodhire.com, via `X-Forwarded-Server`).
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Reflected XSS via unkeyed header | critical | CWE-79 |
+| DOM-based cache poisoning via unkeyed header | critical | CWE-79 |
+| Script import hijack via unkeyed header | critical | CWE-79 |
+| Open redirect via unkeyed X-Forwarded-Host/`<header>` | high | CWE-79 |
+
 ## Web cache entanglement (fat GET & parameter cloaking)
 
 Two more ways an origin can read an input the cache key ignores, both from Kettle's ["Web Cache Entanglement: Novel Pathways to Poisoning"](https://portswigger.net/research/web-cache-entanglement) (Black Hat USA 2020). Both use the same marker-and-confirm method as unkeyed input mining, on a cache-buster-isolated URL.

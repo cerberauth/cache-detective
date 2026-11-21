@@ -6,7 +6,7 @@ package security
 // "Practical Web Cache Poisoning" (2018) and Param Miner's default header
 // list.
 var defaultHeaderWordlist = []string{
-	"X-Forwarded-Host",
+	headerXForwardedHost,
 	"X-Forwarded-Scheme",
 	"X-Forwarded-Proto",
 	"X-Forwarded-Server",

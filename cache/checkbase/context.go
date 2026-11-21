@@ -263,6 +263,12 @@ const (
 	// cache keeps a separate entry per distinct value of an arbitrary query
 	// parameter, with no cap.
 	CheckIDKeyExplosion harnessx.CheckID = "cache.key_explosion"
+	// CheckIDUnkeyedImpact is the §5 unkeyed-input exploitation-impact
+	// check: concrete exploitation outcomes (reflected XSS, open redirect,
+	// DOM-based poisoning, script-import hijack) for the host-controlling
+	// headers UnkeyedHeaderCheck mines, confirmed the same poison/confirm
+	// way.
+	CheckIDUnkeyedImpact harnessx.CheckID = "cache.unkeyed_impact"
 	// CheckIDConsistency is the §6 response-consistency & correctness check.
 	CheckIDConsistency harnessx.CheckID = "cache.consistency"
 	// CheckIDStaleServing is the §9 stale-while-revalidate/stale-if-error

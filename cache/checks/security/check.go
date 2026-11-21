@@ -37,6 +37,12 @@ const (
 
 	// langParam is a common locale parameter name shared by the wordlists.
 	langParam = "lang"
+
+	// headerXForwardedHost is the most commonly honored host-override
+	// header, referenced by name across several checks in this package
+	// (response splitting, unkeyed-input mining, unkeyed-input exploitation
+	// impact) — kept as one constant rather than a repeated literal.
+	headerXForwardedHost = "X-Forwarded-Host"
 )
 
 // cachePoisoningTag is applied to every CheckDef here that can plant
@@ -540,7 +546,7 @@ func runResponseSplitting(ctx context.Context, target harnessx.Target, resource 
 		return harnessx.Result{}, err
 	}
 	req, err := checkbase.NewRequest(ctx, busterProbe.URL+withMarkerQuery(busterProbe.URL, payload), pctx, checkbase.MergeHeader(busterProbe.Header, http.Header{
-		"X-Forwarded-Host": {payload},
+		headerXForwardedHost: {payload},
 	}))
 	if err != nil {
 		return harnessx.Result{}, err

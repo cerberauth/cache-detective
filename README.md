@@ -359,6 +359,8 @@ checks, err := embed.Checks(pack, embed.Options{
 })
 ```
 
+A host that owns its resources (a `ScopePerResource` host engine) sets `checkbase.ResourceRequest` as `harnessx.Resource.Data`: that resource's method, headers, cookies and body then replace the scan-wide `ProbeCtx` values for every probe of it, and `cache.discovery` is not needed. Checks are tagged `passive` (read-only) or `aggressive` (can pollute a shared cache; gated by `ProbeCtx.Aggressive`), so a host selects either set by tag. The un-prefixed IDs used before the pack contract (`authenticated-cacheable`, `cache-deception`, …) still resolve through `cache.ResolveCheckID`.
+
 ## Testing
 
 `go test ./...` — every check package has `httptest.Server`-backed tests, plus pure-logic unit tests for the parsing/analysis functions that don't need a live server.

@@ -158,9 +158,13 @@ func joinReasons(reasons []string) string {
 // AuthCheck reports on.
 func authViolation(analysis AnalysisResult) bool {
 	cc := analysis.CacheControl
-	if !analysis.Authenticated || !analysis.Cacheable || cc.Private || cc.NoStore {
+	if !analysis.Authenticated || !analysis.Cacheable || cc.Private || cc.NoStore || cc.NoCache {
 		return false
 	}
+	// no-cache obliges a cache to revalidate with the origin (carrying the
+	// request's credentials) before every reuse, so nothing is served to
+	// another user unchecked.
+	//
 	// RFC 9111 §3.5: must-revalidate, public, or s-maxage on the response
 	// explicitly opts a shared cache back into storing it despite the
 	// request carrying Authorization. Any other combination is a violation.

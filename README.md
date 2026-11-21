@@ -36,6 +36,7 @@
 | Cacheable `Set-Cookie` responses (session / CSRF material a shared cache would replay) | ✓ |
 | Credentials missing from the cache key (credential-less request served the authenticated response) | ✓ |
 | Live HIT/MISS/STALE/EXPIRED/BYPASS state detection | ✓ |
+| Cache-based information disclosure sweep (live-HIT responses carrying session markers; PII/token-bearing JSON missing OWASP WSTG-ATHN-06's no-store/no-cache guidance) | ✓ |
 | CDN/reverse-proxy fingerprinting (CNAME + Server/Via) | ✓ |
 | Declared vs. observed cache-key (`Vary`) analysis | ✓ |
 | Wordlist-driven unkeyed-input mining (headers, cookies, query parameters), custom wordlist support | `--aggressive` |
@@ -312,6 +313,7 @@ Each numbered section below is one `harnessx.Check` (or a small family of them),
 | 7 | `cache/crawl` | URL list / sitemap / `.har` import / same-origin crawl with scope + `robots.txt` courtesy, resolved **before** the engine runs |
 | 8 | `cache/geo` | `Provider` interface + `NoopProvider` for future multi-region probing — no real geo backend ships in v1 |
 | 9 | `cache/checks/staleserving` | Confirms declared `stale-while-revalidate`/`stale-if-error` (RFC 5861) are actually honored by the fronting cache — `stale-if-error` confirmation is `--aggressive`-gated, since it means simulating an origin failure |
+| 10 | `cache/checks/disclosure` | Cache-based information disclosure sweep: pure analysis of §1's and §2's own results (no extra requests) — a resource actually observed as a live cache HIT while carrying Set-Cookie/CSRF/session markers, and a PII/token-bearing JSON response missing OWASP WSTG-ATHN-06's no-store/no-cache guidance regardless of authentication state |
 | — | `cache/cdn` | The extensible CDN signature table (Cloudflare, Fastly, Akamai, CloudFront, Varnish, Vercel, Netlify, Pantheon, Google Cloud CDN, Azure Front Door, Nginx, KeyCDN, Bunny CDN, ...) every detection/fingerprint check reads from, plus known static-extension lists, cache-key normalization notes, and disclosed quirks/CVEs per entry; also the concurrency-safe `DiscoveredQuirks` store of per-target delimiter/normalization behavior the §5 mapper records at scan time |
 | — | `cache/checkbase` | Shared `ProbeCtx` (the scan-wide config every check reads from `Target.Data`), request-building helpers, the cache-buster framework (`NewCacheBusterProbe`), and `DiscoveryCheck` |
 | — | `cache/probe.go` | `BuildChecks`/`CheckDefs`/`ScanAll` — wires every check into one `harnessx.Engine.Run` |

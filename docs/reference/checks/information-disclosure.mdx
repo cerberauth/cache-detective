@@ -1,0 +1,20 @@
+---
+title: Information disclosure sweep
+description: Broad, non-aggressive pass for personalized/authenticated content ending up in a shared cache.
+sidebar:
+  order: 9
+---
+
+A broad, non-aggressive pass across every crawled resource: pure analysis of the [cacheability](../cacheability/) and [live cache state](../live-cache-state/) checks' own results, issuing no extra requests of its own. It's distinct from `AuthDef`/`SessionDef` ([cacheability analysis](../cacheability/)), which flag a *declared* cacheability misconfiguration from the response's own headers — this check flags what's actually been *observed* happening, plus a class those checks don't cover at all: an unauthenticated response leaking other users' data.
+
+## What it checks
+
+- **Live session disclosure**: a resource actually observed as a cache **HIT** (not just theoretically cacheable) while its response carries `Set-Cookie`, a CSRF token, or another session-specific marker.
+- **Sensitive JSON missing no-store/no-cache**: a JSON-looking response carrying PII or token material (email address, JWT, `api_key`/`password`/`csrf_token`/... field, credit-card-shaped number, SSN) without both `Cache-Control: no-store` and `no-cache` — checked regardless of whether the request was authenticated, per [OWASP WSTG-ATHN-06](https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/04-Authentication_Testing/06-Testing_for_Browser_Cache_Weaknesses), which calls for both directives (reinforced with `must-revalidate`, `max-age=0`, `s-maxage=0` as defense-in-depth on sensitive pages).
+
+## Findings
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Shared cache is serving session-specific content | critical | CWE-524 |
+| Sensitive JSON response missing no-store/no-cache | high | CWE-524 |

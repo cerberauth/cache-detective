@@ -37,7 +37,7 @@ var collisionVariants = []struct {
 	name string
 	up   string
 }{
-	{name: "plain", up: "/../../"},
+	{name: traversalFormPlain, up: "/../../"},
 	{name: "encoded", up: "/..%2f..%2f"},
 }
 

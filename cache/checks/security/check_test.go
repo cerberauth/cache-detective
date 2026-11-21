@@ -673,6 +673,34 @@ func TestCPDoSCheck_TriesEveryMetaCharacterUntilOneProvokesAnError(t *testing.T)
 	assert.Contains(t, res.Observations[0].Evidence, "CR")
 }
 
+// TestCPDoSCheck_DoesNotReportMetaCharacterWhenErrorIsNotCached simulates an
+// origin that rejects the meta-character but sits behind no cache: the plain
+// follow-up request must succeed, so nothing is reported. The confirm
+// request must not carry the meta-character itself, or it would trivially
+// get the same error back.
+func TestCPDoSCheck_DoesNotReportMetaCharacterWhenErrorIsNotCached(t *testing.T) {
+	defer security.SetCPDoSTTLWindowForTest(time.Millisecond)()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.ContainsRune(r.URL.Query().Get("name"), 0) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte("welcome"))
+	}))
+	defer srv.Close()
+
+	pctx := (&checkbase.ProbeCtx{Probe: probe.New(), Aggressive: true, MaxAggressiveRequests: 40}).WithDefaults()
+	pctx.Resources = []checkbase.ResourceSpec{{ID: "root", URL: srv.URL + "/?name=cache-detective"}}
+
+	summary, err := newCPDoSEngine(t).Run(context.Background(), harnessx.Target{URL: srv.URL, Data: &pctx})
+	require.NoError(t, err)
+
+	res, ok := findResult(summary, checkbase.CheckIDCPDoS, "root")
+	require.True(t, ok)
+	assert.Empty(t, res.Observations)
+}
+
 // TestCPDoSCheck_DoesNotReportMetaCharacterThatExpiresBeforeTTLWindow
 // simulates a poisoned error that's gone again by the time the HMC probe's
 // delayed re-check lands, and checks that it's not reported as a finding.

@@ -320,12 +320,12 @@ jobs:
           - challenge: "cache-cpdos-meta-character"
             path: "/?name=cache-detective"
             vulnerable: true
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --max-aggressive-requests 30"
             expect_title: "CPDoS via HTTP meta-character (HMC)"
           - challenge: "cache-cpdos-meta-character"
             path: "/?name=cache-detective"
             vulnerable: false
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --max-aggressive-requests 30"
             expect_title: "CPDoS via HTTP meta-character (HMC)"
           - challenge: "cache-poisoning-unkeyed-header"
             path: "/"

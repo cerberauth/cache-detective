@@ -41,8 +41,18 @@ const (
 	// headerXForwardedHost is the most commonly honored host-override
 	// header, referenced by name across several checks in this package
 	// (response splitting, unkeyed-input mining, unkeyed-input exploitation
-	// impact) — kept as one constant rather than a repeated literal.
+	// impact, URL-parser discrepancy poisoning) — kept as one constant rather than a repeated literal.
 	headerXForwardedHost = "X-Forwarded-Host"
+
+	// cweUnkeyedInput is CWE-444 (Inconsistent Interpretation of HTTP
+	// Requests, "HTTP Request/Response Smuggling") — shared by every check
+	// whose finding is an input the origin honors but the cache key
+	// ignores.
+	cweUnkeyedInput = "CWE-444"
+
+	// traversalFormPlain labels the unencoded "../" dot-segment spelling,
+	// shared across the checks that try it alongside an encoded form.
+	traversalFormPlain = "plain"
 )
 
 // cachePoisoningTag is applied to every CheckDef here that can plant
@@ -83,7 +93,7 @@ var UnkeyedHeaderDef = checkbase.CheckDef{
 	DependsOn:   []string{string(checkbase.CheckIDDiscovery)},
 	CVSSVector:  cvssPoisoning,
 	CVSSScore:   9.3,
-	CWEID:       "CWE-444",
+	CWEID:       cweUnkeyedInput,
 	OWASP:       owaspMisconfig,
 }
 
@@ -594,7 +604,7 @@ var CPDoSDef = checkbase.CheckDef{
 	DependsOn:  []string{string(checkbase.CheckIDDiscovery), string(checkbase.CheckIDResponseSplitting)},
 	CVSSVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
 	CVSSScore:  7.5,
-	CWEID:      "CWE-444",
+	CWEID:      cweUnkeyedInput,
 }
 
 var CPDoSCheck = checkdef.NewResourceCheck(CPDoSDef, runCPDoS)

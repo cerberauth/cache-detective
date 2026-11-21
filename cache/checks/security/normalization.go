@@ -51,7 +51,7 @@ type traversalVariant struct {
 
 var traversalVariants = []traversalVariant{
 	{
-		name:   "plain",
+		name:   traversalFormPlain,
 		title:  "Cache deception via static-directory path traversal",
 		up:     "/../../",
 		detail: "the origin resolves the \"../\" segments and routes the request to the real resource, while a cache whose static-directory rule matches the raw path still sees a \"/static/...\" URL",

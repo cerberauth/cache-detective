@@ -65,6 +65,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		security.KeyExplosionCheck,
 		smuggling.Check,
 		security.UnkeyedImpactCheck,
+		security.URLParserDiscrepancyCheck,
 	}
 
 	defs := map[harnessx.CheckID]checkbase.CheckDef{
@@ -90,6 +91,7 @@ func BuildChecks() ([]harnessx.Check, map[harnessx.CheckID]checkbase.CheckDef) {
 		checkbase.CheckIDKeyExplosion:           security.KeyExplosionDef,
 		checkbase.CheckIDSmuggling:              smuggling.Def,
 		checkbase.CheckIDUnkeyedImpact:          security.UnkeyedImpactDef,
+		checkbase.CheckIDURLParserDiscrepancy:   security.URLParserDiscrepancyDef,
 	}
 	return checks, defs
 }

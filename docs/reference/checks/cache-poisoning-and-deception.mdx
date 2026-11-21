@@ -160,6 +160,22 @@ Plain and `%2f`-encoded separators are tried against `/static` and `/assets`; th
 |---|---|---|
 | Cache-key path collision via path traversal | critical | CWE-436 |
 
+## URL-parser discrepancy poisoning
+
+Also from ["Gotta cache 'em all"](https://portswigger.net/research/gotta-cache-em-all), but without the key-collision check's precondition of a static route that happens to answer `2xx` for an arbitrary filename: the attacker-controlled "what" is supplied directly, as a marker reflected via the unkeyed `X-Forwarded-Host` header (the same precondition unkeyed input mining exploits), so this check demonstrates impact against dynamic/API origins too.
+
+- **Key-normalization poisoning** — `/<payload>/../<victim>`, tried in a plain `../` spelling and an encoded-backslash `%5c..%5c` spelling IIS and some other platforms resolve identically to a forward slash. If the cache collapses the traversal before keying (landing on the random victim's key) while the origin routes — and reflects the marker for — the full raw path, a plain request for the victim path alone replays the attacker's response. No delimiter confirmation needed; both spellings are tried independently.
+- **Back-end delimiter composite** — `/<payload><delimiter>/../<victim>`, built from an origin-only delimiter [Delimiter & normalization mapping](#delimiter--normalization-mapping) already confirmed for this target, combined with the cache's own measured dot-segment normalization order. The origin ignores everything from the delimiter onward (routing, and reflecting the marker for, the payload alone), while the cache — confirmed to collapse dot-segments before keying — computes its key as if neither the delimiter nor the traversal were there.
+- **Front-end delimiter composite** — `/<victim><delimiter>/../<payload>`, the reverse: built from a confirmed cache-only delimiter combined with the origin's own confirmed dot-segment collapsing. The cache truncates its key at the delimiter (keying as the plain victim path), while the origin routes past it entirely and reflects the marker for the payload instead.
+
+Every probe targets a random, never-requested victim path — the same technique reaches any cache key, including a high-value static one such as `/main.js`.
+
+| Finding | Severity | CWE |
+|---|---|---|
+| Cache-key normalization poisoning (`<form>` traversal) | critical | CWE-444 |
+| Cache-key poisoning via back-end delimiter `<delimiter>` | critical | CWE-444 |
+| Cache-key poisoning via front-end delimiter `<delimiter>` | critical | CWE-444 |
+
 ## Error response caching
 
 Provokes a 4xx/5xx response (via an out-of-range `Range` request) and checks whether the error response itself carries cache directives that make it cacheable — a transient error served to other users for longer than intended.

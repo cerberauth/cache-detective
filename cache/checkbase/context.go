@@ -269,6 +269,14 @@ const (
 	// headers UnkeyedHeaderCheck mines, confirmed the same poison/confirm
 	// way.
 	CheckIDUnkeyedImpact harnessx.CheckID = "cache.unkeyed_impact"
+	// CheckIDURLParserDiscrepancy is the §5 URL-parser discrepancy
+	// poisoning check: cache-vs-origin path-parsing mismatches (dot-segment
+	// key normalization, and — combined with DelimiterMapperCheck's
+	// confirmed per-origin delimiters — the origin-only/cache-only
+	// delimiter composites) that let an attacker store a chosen response
+	// under an arbitrary cache key ("cache what/where", Doyhenard, "Gotta
+	// cache 'em all", Black Hat USA 2024).
+	CheckIDURLParserDiscrepancy harnessx.CheckID = "cache.url_parser_discrepancy"
 	// CheckIDConsistency is the §6 response-consistency & correctness check.
 	CheckIDConsistency harnessx.CheckID = "cache.consistency"
 	// CheckIDStaleServing is the §9 stale-while-revalidate/stale-if-error

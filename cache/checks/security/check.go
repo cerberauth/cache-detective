@@ -852,16 +852,23 @@ func probeCPDoSMetaCharacter(ctx context.Context, pctx *checkbase.ProbeCtx, reso
 		}
 		*budget--
 
-		poisonedURL := *u
+		// The buster probe wraps the plain resource URL, so the confirm
+		// request below (busterProbe.URL) carries no meta-character: it must
+		// observe whether the cache replays the error to an ordinary caller,
+		// not re-send the malicious query and trivially get the error again.
+		busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
+		if err != nil {
+			continue
+		}
+		poisonedURL, err := url.Parse(busterProbe.URL)
+		if err != nil {
+			continue
+		}
 		pq := poisonedURL.Query()
 		pq.Set(param, pq.Get(param)+ch)
 		poisonedURL.RawQuery = pq.Encode()
 
-		busterProbe, err := checkbase.NewCacheBusterProbe(poisonedURL.String(), pctx)
-		if err != nil {
-			continue
-		}
-		poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, busterProbe.Header)
+		poisonReq, err := checkbase.NewRequest(ctx, poisonedURL.String(), pctx, busterProbe.Header)
 		if err != nil {
 			continue
 		}

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
 
 env:
   GO_VERSION: "1.27"
@@ -81,7 +82,7 @@ jobs:
 
       - name: Scan /account for cache deception (aggressive)
         run: |
-          ./cache-detective scan --url http://localhost:8080/account --requests 1 --aggressive --sqa-opt-out \
+          ./cache-detective scan --url http://localhost:8080/account --requests 1 --aggressive --bearer fixture-token --sqa-opt-out \
             --output-format json --output account-report.json --quiet
 
       - name: Check cache-deception result matches expected vulnerability state
@@ -279,22 +280,22 @@ jobs:
           - challenge: "cache-deception-static-extension"
             path: "/profile"
             vulnerable: true
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --bearer victim-secret-token"
             expect_title: "Cache deception via path confusion"
           - challenge: "cache-deception-static-extension"
             path: "/profile"
             vulnerable: false
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --bearer victim-secret-token"
             expect_title: "Cache deception via path confusion"
           - challenge: "cache-deception-delimiter"
             path: "/account"
             vulnerable: true
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --bearer victim-secret-token"
             expect_title: "Cache deception via path confusion"
           - challenge: "cache-deception-delimiter"
             path: "/account"
             vulnerable: false
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --bearer victim-secret-token"
             expect_title: "Cache deception via path confusion"
           - challenge: "cache-cpdos-header-oversize"
             path: "/"
@@ -319,12 +320,12 @@ jobs:
           - challenge: "cache-cpdos-meta-character"
             path: "/?name=cache-detective"
             vulnerable: true
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --max-aggressive-requests 30"
             expect_title: "CPDoS via HTTP meta-character (HMC)"
           - challenge: "cache-cpdos-meta-character"
             path: "/?name=cache-detective"
             vulnerable: false
-            scan_args: "--aggressive"
+            scan_args: "--aggressive --max-aggressive-requests 30"
             expect_title: "CPDoS via HTTP meta-character (HMC)"
           - challenge: "cache-poisoning-unkeyed-header"
             path: "/"

@@ -156,7 +156,7 @@ Reproduces the three variants from the original 2019 [CPDoS](https://cpdos.org/)
 
 - **HTTP Header Oversize (HHO)** — an oversized header block a fronting cache accepts but the origin's own, smaller limit rejects. Reported only when the poisoned error is still being served a couple of seconds later, not just on the immediate follow-up request — a trivially short-lived cache entry has no realistic chance of reaching anyone but the probe itself.
 - **HTTP Method Override (HMO)** — an `X-HTTP-Method-Override: DELETE` header the origin honors (re-interpreting the request) but the cache ignores, keying purely on the real `GET` line.
-- **HTTP Meta Character (HMC)** — a control character injected into an *existing* query parameter's value, rejected by the origin's input validation while the cache keys on the path alone. Needs a resource with at least one query parameter to mutate; a bare path has no surface for this variant and is silently skipped.
+- **HTTP Meta Character (HMC)** — a control character (NUL, CR, or LF — tried in turn until one works or the budget runs out) injected into an *existing* query parameter's value, rejected by the origin's input validation while the cache keys on the path alone. Needs a resource with at least one query parameter to mutate; a bare path has no surface for this variant and is silently skipped. Reported only when the poisoned error is still being served a couple of seconds later, not just on the immediate follow-up request.
 
 Stops after the first confirmed variant per resource: once one has poisoned a (typically single-slot) cache, the remaining variants would just observe that same residual poisoning rather than an independent finding.
 

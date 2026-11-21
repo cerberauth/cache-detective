@@ -583,24 +583,25 @@ func runCPDoS(ctx context.Context, target harnessx.Target, resource harnessx.Res
 	budget := pctx.MaxAggressiveRequests
 
 	var obs []harnessx.Observation
-	// cost is each variant's own request budget: HHO spends one extra
-	// request beyond poison+confirm to re-check the poisoned error after
-	// cpdosTTLWindow (see probeCPDoSHeaderOversize), so it needs 3; the
-	// others still just poison once and confirm once.
+	// minCost is the fewest requests a variant needs to reach a verdict, so a
+	// nearly-exhausted budget skips it instead of starting a probe it can't
+	// finish. Each probe deducts what it actually spends from budget: HHO
+	// poisons, confirms and re-checks after cpdosTTLWindow (3); HMO poisons
+	// and confirms once (2); HMC does poison + confirm + re-check per
+	// meta-character it tries (3 each).
 	probes := []struct {
-		fn   func(context.Context, *checkbase.ProbeCtx, harnessx.Resource) (harnessx.Observation, bool)
-		cost int
+		fn      func(context.Context, *checkbase.ProbeCtx, harnessx.Resource, *int) (harnessx.Observation, bool)
+		minCost int
 	}{
 		{probeCPDoSHeaderOversize, 3},
 		{probeCPDoSMethodOverride, 2},
-		{probeCPDoSMetaCharacter, 2},
+		{probeCPDoSMetaCharacter, 3},
 	}
 	for _, probe := range probes {
-		if budget < probe.cost {
+		if budget < probe.minCost {
 			break
 		}
-		budget -= probe.cost
-		ob, found := probe.fn(ctx, pctx, resource)
+		ob, found := probe.fn(ctx, pctx, resource, &budget)
 		if !found {
 			continue
 		}
@@ -664,7 +665,8 @@ func cpdosConfirmPersists(ctx context.Context, pctx *checkbase.ProbeCtx, bustedU
 
 // probeCPDoSHeaderOversize implements CPDoS's "HTTP Header Oversize" (HHO)
 // variant: a header block a fronting cache accepts but the origin doesn't.
-func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource) (harnessx.Observation, bool) {
+func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, budget *int) (harnessx.Observation, bool) {
+	*budget -= 3
 	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
 	if err != nil {
 		return harnessx.Observation{}, false
@@ -694,7 +696,8 @@ func probeCPDoSHeaderOversize(ctx context.Context, pctx *checkbase.ProbeCtx, res
 // probeCPDoSMethodOverride implements CPDoS's "HTTP Method Override" (HMO)
 // variant: a header letting the origin re-interpret a GET as another
 // method, invisibly to the cache which keys purely on the real method/line.
-func probeCPDoSMethodOverride(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource) (harnessx.Observation, bool) {
+func probeCPDoSMethodOverride(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, budget *int) (harnessx.Observation, bool) {
+	*budget -= 2
 	busterProbe, err := checkbase.NewCacheBusterProbe(resource.URL, pctx)
 	if err != nil {
 		return harnessx.Observation{}, false
@@ -721,12 +724,20 @@ func probeCPDoSMethodOverride(ctx context.Context, pctx *checkbase.ProbeCtx, res
 	}, true
 }
 
+// cpdosMetaCharacterNames labels cpdosMetaCharacters for findings/evidence,
+// in the same order, so a report reads "NUL"/"CR"/"LF" instead of an
+// unprintable byte.
+var cpdosMetaCharacterNames = []string{"NUL (\\x00)", "CR (\\r)", "LF (\\n)"}
+
 // probeCPDoSMetaCharacter implements CPDoS's "HTTP Meta Character" (HMC)
 // variant: a control character in an existing query value the origin
 // rejects, while the cache keys on the path alone. Needs an existing query
 // parameter to mutate — a resource with no query string has no surface for
-// this variant, and is silently skipped.
-func probeCPDoSMetaCharacter(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource) (harnessx.Observation, bool) {
+// this variant, and is silently skipped. Tries every character in
+// cpdosMetaCharacters in turn (not just the first) until budget runs out or
+// one provokes a poisoned error that's still being served cpdosTTLWindow
+// later — a trivially short-lived entry never reaches anyone but the probe.
+func probeCPDoSMetaCharacter(ctx context.Context, pctx *checkbase.ProbeCtx, resource harnessx.Resource, budget *int) (harnessx.Observation, bool) {
 	u, err := url.Parse(resource.URL)
 	if err != nil || u.RawQuery == "" {
 		return harnessx.Observation{}, false
@@ -741,33 +752,51 @@ func probeCPDoSMetaCharacter(ctx context.Context, pctx *checkbase.ProbeCtx, reso
 		return harnessx.Observation{}, false
 	}
 
-	poisonedURL := *u
-	pq := poisonedURL.Query()
-	pq.Set(param, pq.Get(param)+cpdosMetaCharacters[0])
-	poisonedURL.RawQuery = pq.Encode()
+	for i, ch := range cpdosMetaCharacters {
+		if *budget < 1 {
+			return harnessx.Observation{}, false
+		}
+		*budget--
 
-	busterProbe, err := checkbase.NewCacheBusterProbe(poisonedURL.String(), pctx)
-	if err != nil {
-		return harnessx.Observation{}, false
-	}
-	poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, busterProbe.Header)
-	if err != nil {
-		return harnessx.Observation{}, false
-	}
-	poisoned, err := checkbase.Do(ctx, pctx, poisonReq)
-	if err != nil || poisoned.StatusCode < 400 {
-		return harnessx.Observation{}, false
+		poisonedURL := *u
+		pq := poisonedURL.Query()
+		pq.Set(param, pq.Get(param)+ch)
+		poisonedURL.RawQuery = pq.Encode()
+
+		busterProbe, err := checkbase.NewCacheBusterProbe(poisonedURL.String(), pctx)
+		if err != nil {
+			continue
+		}
+		poisonReq, err := checkbase.NewRequest(ctx, busterProbe.URL, pctx, busterProbe.Header)
+		if err != nil {
+			continue
+		}
+		poisoned, err := checkbase.Do(ctx, pctx, poisonReq)
+		if err != nil || poisoned.StatusCode < 400 {
+			continue
+		}
+
+		if *budget < 2 {
+			return harnessx.Observation{}, false
+		}
+		*budget -= 2
+		if !cpdosConfirmPersists(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
+			continue
+		}
+
+		name := ch
+		if i < len(cpdosMetaCharacterNames) {
+			name = cpdosMetaCharacterNames[i]
+		}
+		return harnessx.Observation{
+			CheckID:     checkbase.CheckIDCPDoS,
+			ResourceID:  resource.ID,
+			Title:       "CPDoS via HTTP meta-character (HMC)",
+			Description: fmt.Sprintf("a %s meta-character injected into the existing %q query value provoked a %d origin error, and a follow-up plain request (path unchanged) was still being served that same error %s later — the cache keyed on the path alone, unaware of the query value that caused it", name, param, poisoned.StatusCode, cpdosTTLWindow),
+			Evidence:    fmt.Sprintf("status=%d after a %s meta-character in %q, confirmed again %s later on an unmodified follow-up request", poisoned.StatusCode, name, param, cpdosTTLWindow),
+			Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityHigh},
+		}, true
 	}
 
-	if !cpdosConfirm(ctx, pctx, busterProbe.URL, busterProbe.Header, poisoned.StatusCode) {
-		return harnessx.Observation{}, false
-	}
-	return harnessx.Observation{
-		CheckID:     checkbase.CheckIDCPDoS,
-		ResourceID:  resource.ID,
-		Title:       "CPDoS via HTTP meta-character (HMC)",
-		Description: fmt.Sprintf("a control character injected into the existing %q query value provoked a %d origin error, and a follow-up plain request (path unchanged) received the same error — the cache keyed on the path alone, unaware of the query value that caused it", param, poisoned.StatusCode),
-		Evidence:    fmt.Sprintf("status=%d after a meta-character in %q, then again on an unmodified follow-up request", poisoned.StatusCode, param),
-		Metadata:    map[string]string{checkbase.SeverityKey: checkbase.SeverityHigh},
-	}, true
+	return harnessx.Observation{}, false
 }

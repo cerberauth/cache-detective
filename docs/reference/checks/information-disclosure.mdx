@@ -1,11 +1,11 @@
 ---
-title: Information disclosure sweep
+title: Information disclosure
 description: Broad, non-aggressive pass for personalized/authenticated content ending up in a shared cache.
 sidebar:
   order: 9
 ---
 
-A broad, non-aggressive pass across every crawled resource: pure analysis of the [cacheability](../cacheability/) and [live cache state](../live-cache-state/) checks' own results, issuing no extra requests of its own. It's distinct from `AuthDef`/`SessionDef` ([cacheability analysis](../cacheability/)), which flag a *declared* cacheability misconfiguration from the response's own headers — this check flags what's actually been *observed* happening, plus a class those checks don't cover at all: an unauthenticated response leaking other users' data.
+A broad, non-aggressive pass across every crawled resource: pure analysis of the [cacheability](./cacheability/) and [live cache state](./live-cache-state/) checks' own results, issuing no extra requests of its own. It's distinct from `AuthDef`/`SessionDef` ([cacheability analysis](./cacheability/)), which flag a *declared* cacheability misconfiguration from the response's own headers — this check flags what's actually been *observed* happening, plus a class those checks don't cover at all: an unauthenticated response leaking other users' data.
 
 ## What it checks
 

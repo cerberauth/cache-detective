@@ -1,5 +1,5 @@
 ---
-title: Cache key & Vary
+title: Cache key and Vary
 description: Declared vs. observed cache-key inclusion.
 sidebar:
   order: 5
@@ -27,7 +27,7 @@ For each of `Accept-Encoding`, `Accept-Language`, `User-Agent`, and a custom hea
 
 ## Request budget
 
-This check issues extra requests to the live target but is **not** gated behind `--aggressive` — it's read-only from the target's point of view (it never plants content a poisoned cache would later replay; that's [Cache poisoning & deception](../cache-poisoning-and-deception/)'s job). It still respects `--max-aggressive-requests` as a hard cap on probe count per resource.
+This check issues extra requests to the live target but is **not** gated behind `--aggressive` — it's read-only from the target's point of view (it never plants content a poisoned cache would later replay; that's [Cache poisoning & deception](./cache-poisoning/)'s job). It still respects `--max-aggressive-requests` as a hard cap on probe count per resource.
 
 ## Credentials in the cache key
 

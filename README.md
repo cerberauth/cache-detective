@@ -160,7 +160,7 @@ docker run --rm --network container:api ghcr.io/cerberauth/cache-detective \
   scan --url http://localhost:8080/
 ```
 
-See the [Docker guide](./docs/docker.mdx) for Compose usage and building the dev image from source.
+See the [Docker guide](./docs/deployment/docker.mdx) for Compose usage and building the dev image from source.
 
 ---
 

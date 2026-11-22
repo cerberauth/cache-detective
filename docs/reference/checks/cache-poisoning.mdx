@@ -1,5 +1,5 @@
 ---
-title: Cache poisoning & deception
+title: Cache poisoning and deception
 description: Aggressive-only probes for exploitable cache behavior.
 sidebar:
   order: 6
@@ -13,7 +13,7 @@ import { Aside } from '@/components/docs';
 
 ## Cache-buster isolation
 
-Unkeyed input mining, web cache entanglement, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../../cli/scan/#cache-buster-isolation).
+Unkeyed input mining, web cache entanglement, error response caching, response splitting, and CPDoS each write attacker-controlled content or an error response back through the resource's own URL, then send a follow-up request to confirm a shared cache is replaying it. Both requests in that pair go to a cache-buster-isolated URL/header — a fresh random token per attempt (`--cache-buster-param`, default `cd_cachebuster`, as a query param by default; `--cache-buster-mode header`/`both` for a header instead) — instead of the resource's plain canonical URL, so confirming the vulnerability never poisons the cache entry a real visitor's plain request would read from. See [`scan`'s cache-buster flags](../cli/scan/#cache-buster-isolation).
 
 ## Unkeyed input mining
 
@@ -25,7 +25,7 @@ Each surface mines its own bundled default wordlist, in this order:
 - **Cookies** — `debug`, `beta`, `preview`, `test`, `lang`, `language`, `locale`, `region`, `country`, `currency`, `theme`, `mobile`
 - **Query parameters** — `debug`, `test`, `preview`, `callback`, `jsonp`, `redirect`, `return_url`, `next`, `utm_source`, `utm_campaign`, `ref`, `lang`, `locale`
 
-[`scan`'s `--unkeyed-wordlist`](../../cli/scan/#unkeyed-input-mining-wordlist) supplements every surface's bundled list with app-specific candidate names of your own. `--max-aggressive-requests` is shared across all three surfaces (headers exhausted before cookies before query parameters), so mining deep into the bundled — let alone a custom — wordlist may need raising it well past its default of `10`.
+[`scan`'s `--unkeyed-wordlist`](../cli/scan/#unkeyed-input-mining-wordlist) supplements every surface's bundled list with app-specific candidate names of your own. `--max-aggressive-requests` is shared across all three surfaces (headers exhausted before cookies before query parameters), so mining deep into the bundled — let alone a custom — wordlist may need raising it well past its default of `10`.
 
 | Finding | Severity | CWE |
 |---|---|---|
@@ -54,7 +54,7 @@ Goes a step past unkeyed input mining's "this value comes back unmodified": for 
 Two more ways an origin can read an input the cache key ignores, both from Kettle's ["Web Cache Entanglement: Novel Pathways to Poisoning"](https://portswigger.net/research/web-cache-entanglement) (Black Hat USA 2020). Both use the same marker-and-confirm method as unkeyed input mining, on a cache-buster-isolated URL.
 
 - **Fat GET** — a `GET` request carrying a body. Caches key on the URL and don't expect a GET body to change the response, but some origins still let it override a query parameter. The marker is sent as a raw body, then as form-encoded and JSON bodies keyed by the resource's own query parameter names (or `q` when it has none). Skipped when the scan method isn't `GET`, since a body is ordinary there.
-- **Parameter cloaking** — `;<name>=<marker>` appended to the query string. A cache that stops reading the query at the first `;` keys the request like the plain URL, while an origin that treats `;` as a parameter separator (Rails, some Java stacks) still reads the cloaked parameter. Candidate names are the resource's own query parameters, then `name`, `q`, `search`, `query`, `callback`, `redirect`, `url`, `lang`, plus any [`--unkeyed-wordlist`](../../cli/scan/#unkeyed-input-mining-wordlist) entries.
+- **Parameter cloaking** — `;<name>=<marker>` appended to the query string. A cache that stops reading the query at the first `;` keys the request like the plain URL, while an origin that treats `;` as a parameter separator (Rails, some Java stacks) still reads the cloaked parameter. Candidate names are the resource's own query parameters, then `name`, `q`, `search`, `query`, `callback`, `redirect`, `url`, `lang`, plus any [`--unkeyed-wordlist`](../cli/scan/#unkeyed-input-mining-wordlist) entries.
 
 This check has its own `--max-aggressive-requests` budget (it isn't shared with unkeyed input mining), so both techniques run within the default of `10`: fat GET first, then cloaking.
 

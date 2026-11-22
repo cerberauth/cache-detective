@@ -32,7 +32,7 @@ brew install cerberauth/tap/cache-detective
 docker run --rm ghcr.io/cerberauth/cache-detective scan --url https://example.com/
 ```
 
-See the [Docker guide](./docker/) for volume mounts, Compose, and CI usage.
+See the [Docker guide](./deployment/docker/) for volume mounts, Compose, and CI usage.
 
   </TabItem>
   <TabItem label="From source">
@@ -71,7 +71,7 @@ cache-detective --version
 
 ## GitHub Actions
 
-To use `cache-detective` in a GitHub Actions workflow, see the [GitHub Actions guide](./github-actions/).
+To use `cache-detective` in a GitHub Actions workflow, see the [GitHub Actions guide](./deployment/github-actions/).
 
 <Aside type="caution">
   `--aggressive` intentionally probes for exploitable cache behavior (cache poisoning, cache deception). Only run it against systems you own or have explicit written permission to test.

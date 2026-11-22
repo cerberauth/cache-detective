@@ -1,5 +1,5 @@
 ---
-title: scan
+title: cache-detective scan
 description: Analyze cacheability and live cache behavior for one or more URLs.
 sidebar:
   order: 2
@@ -159,4 +159,4 @@ cache-detective scan --url https://example.com/ --output-format json --output re
 
 ## Exit codes
 
-`scan` exits `1` if any check itself failed to execute (network errors, timeouts, ...) and `0` otherwise — findings are reported but don't affect the exit code on their own. To gate a build on specific findings, parse the JSON output (see the [GitHub Actions guide](../../github-actions/#fail-the-build-on-a-specific-finding)) or use [`diff`](./diff/) to detect drift against a baseline.
+`scan` exits `1` if any check itself failed to execute (network errors, timeouts, ...) and `0` otherwise — findings are reported but don't affect the exit code on their own. To gate a build on specific findings, parse the JSON output (see the [GitHub Actions guide](../../deployment/github-actions/#fail-the-build-on-a-specific-finding)) or use [`diff`](./diff/) to detect drift against a baseline.

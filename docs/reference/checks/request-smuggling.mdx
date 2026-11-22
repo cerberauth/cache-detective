@@ -1,14 +1,14 @@
 ---
-title: Request smuggling / desync
+title: Request smuggling and desync
 description: Optional, higher-blast-radius CL.TE/TE.CL/TE.TE and desync probes.
 sidebar:
-  order: 9
+  order: 10
 ---
 
 import { Aside } from '@/components/docs';
 
 <Aside type="caution">
-  This module runs only with `--aggressive` **and** `--enable-smuggling` together — a higher bar than every other check on the [cache poisoning & deception](../cache-poisoning-and-deception/) page. Every other `--aggressive` check confirms a clean poison/confirm exchange; a positive result here only demonstrates a hung connection via timing, which carries meaningfully higher blast radius. Only run this against systems you own or have explicit written permission to test.
+  This module runs only with `--aggressive` **and** `--enable-smuggling` together — a higher bar than every other check on the [cache poisoning & deception](./cache-poisoning/) page. Every other `--aggressive` check confirms a clean poison/confirm exchange; a positive result here only demonstrates a hung connection via timing, which carries meaningfully higher blast radius. Only run this against systems you own or have explicit written permission to test.
 </Aside>
 
 ## CL.TE / TE.CL / TE.TE differential timing probes

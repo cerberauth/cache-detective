@@ -1,6 +1,8 @@
 ---
-title: Detect cache-config drift over time
+title: Detect cache-config drift
 description: Use scan's JSON output and the diff command to catch cache-behavior regressions between deploys.
+sidebar:
+  order: 3
 ---
 
 A CDN/reverse-proxy config change, a new edge rule, or an origin header regression can silently change a site's caching behavior. `cache-detective scan --output-format json` plus `cache-detective diff` catches that drift in CI.
@@ -39,7 +41,7 @@ Changed severity (0):
 
 ## Wiring it into CI
 
-Persist each scan's JSON as a build artifact and diff against the previous run's artifact — see the full example in the [GitHub Actions guide](../github-actions/#detect-cache-config-drift-between-deploys).
+Persist each scan's JSON as a build artifact and diff against the previous run's artifact — see the full example in the [GitHub Actions guide](../deployment/github-actions/#detect-cache-config-drift-between-deploys).
 
 ## What counts as "the same finding"
 

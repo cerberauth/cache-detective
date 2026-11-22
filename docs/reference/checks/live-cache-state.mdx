@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Issues `--requests` probe requests (default `3`, spaced by `--interval`) per resource and classifies each response's live cache state, independent of whether the response is *supposed* to be cacheable (see [Cacheability analysis](../cacheability/) for that).
+Issues `--requests` probe requests (default `3`, spaced by `--interval`) per resource and classifies each response's live cache state, independent of whether the response is *supposed* to be cacheable (see [Cacheability analysis](./cacheability/) for that).
 
 ## How detection works
 
@@ -22,7 +22,7 @@ Issues `--requests` probe requests (default `3`, spaced by `--interval`) per res
    | Netlify | `X-Nf-Request-Id` (presence only — Netlify emits no HIT/MISS verdict, so it always drops to the timing/Age heuristic below) |
    | Pantheon | `X-Cache` |
 
-   Several of these share the `X-Cache` header name with different value vocabularies (Fastly's `hit`/`miss`/`pass` vs. Akamai's `TCP_HIT`/`TCP_MISS`/... vs. CloudFront's `Hit from cloudfront`/...). The registry disambiguates by fingerprinting the CDN from `Server`/`Via` (or CNAME, via the [CDN fingerprinting](../cdn-fingerprinting/) check) *first*, then reads that CDN's own header — never by guessing from the raw value alone.
+   Several of these share the `X-Cache` header name with different value vocabularies (Fastly's `hit`/`miss`/`pass` vs. Akamai's `TCP_HIT`/`TCP_MISS`/... vs. CloudFront's `Hit from cloudfront`/...). The registry disambiguates by fingerprinting the CDN from `Server`/`Via` (or CNAME, via the [CDN fingerprinting](./cdn-fingerprinting/) check) *first*, then reads that CDN's own header — never by guessing from the raw value alone.
 
 2. **Generic fallback** — an unrecognized `Server-Timing: cdn-cache; desc=HIT` convention, or a generic `X-Cache: HIT/MISS` from a proxy not in the registry.
 3. **Timing/Age heuristic** — when no header gives an explicit verdict at all: a non-decreasing `Age` header across samples, or a repeat request answered meaningfully faster than the first, both suggest a cache is serving the response. This is always reported as a best-effort inference (see "No explicit cache-status header" below), never presented as equivalent to a header-based verdict.
@@ -47,4 +47,4 @@ Across the `--requests` samples for a resource, the check also tracks:
 - **Age increasing across hits** — evidence the same object is being served repeatedly rather than refreshed each time
 - **Hit/miss ratio** — tallied across all samples
 
-This data is available to other checks (e.g. [CDN fingerprinting](../cdn-fingerprinting/) reuses the captured response instead of re-requesting it).
+This data is available to other checks (e.g. [CDN fingerprinting](./cdn-fingerprinting/) reuses the captured response instead of re-requesting it).

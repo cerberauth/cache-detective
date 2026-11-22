@@ -2,7 +2,7 @@
 title: GitHub Actions
 description: Run cache-detective in CI/CD pipelines to catch cache-config drift and cache-related security issues.
 sidebar:
-  order: 3
+  order: 2
 ---
 
 import { Aside } from '@/components/docs';
@@ -96,7 +96,7 @@ Save each scan's JSON output as a build artifact, then diff the current scan aga
     path: after.json
 ```
 
-`cache-detective diff` exits non-zero when findings were added or changed severity, so it can gate the build directly. See [`diff`](./reference/cli/diff/) for details.
+`cache-detective diff` exits non-zero when findings were added or changed severity, so it can gate the build directly. See [`diff`](../reference/cli/diff/) for details.
 
 ### Crawl a site instead of scanning one URL
 

@@ -5,7 +5,7 @@ sidebar:
   order: 8
 ---
 
-Cache-Control's `stale-while-revalidate` and `stale-if-error` directives ([RFC 5861](https://www.rfc-editor.org/rfc/rfc5861)) tell a cache it's allowed to serve stale content while it refreshes in the background, or when the origin is failing. This check confirms the fronting cache actually does that, instead of just trusting the directives' presence — see [Cacheability analysis](../cacheability/) for the directive parsing itself.
+Cache-Control's `stale-while-revalidate` and `stale-if-error` directives ([RFC 5861](https://www.rfc-editor.org/rfc/rfc5861)) tell a cache it's allowed to serve stale content while it refreshes in the background, or when the origin is failing. This check confirms the fronting cache actually does that, instead of just trusting the directives' presence — see [Cacheability analysis](./cacheability/) for the directive parsing itself.
 
 It only runs against a resource that already declares `stale-while-revalidate` and/or `stale-if-error`; a resource without either is skipped entirely.
 
@@ -25,7 +25,7 @@ Waiting for the window is capped by `--stale-window-max-wait` (default `30s`) �
 
 ## stale-if-error
 
-Confirming `stale-if-error` means asking the origin to fail, so — like the [cache poisoning & deception](../cache-poisoning-and-deception/) checks — this only runs under `--aggressive`. It sends a probe header (`X-Cache-Detective-Simulate-Error`) that an instrumented origin or test fixture can use to simulate a failure; a real, uninstrumented origin simply ignores it, in which case the result stays inconclusive rather than being reported either way.
+Confirming `stale-if-error` means asking the origin to fail, so — like the [cache poisoning & deception](./cache-poisoning/) checks — this only runs under `--aggressive`. It sends a probe header (`X-Cache-Detective-Simulate-Error`) that an instrumented origin or test fixture can use to simulate a failure; a real, uninstrumented origin simply ignores it, in which case the result stays inconclusive rather than being reported either way.
 
 | Finding | Severity | Meaning |
 |---|---|---|

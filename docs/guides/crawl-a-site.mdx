@@ -1,6 +1,8 @@
 ---
-title: Crawl and scan a whole site
+title: Crawl and scan a site
 description: Resolve a scan's resource list from a single URL, a list file, a sitemap, a .har import, or a same-origin crawl.
+sidebar:
+  order: 1
 ---
 
 `cache-detective scan` needs a resolved list of URLs before it can run any check — exactly one of `--url`, `--list`, `--sitemap`, `--har`, or `--crawl` supplies it. Every check then runs concurrently across that resource list (`--max-resource-concurrency` bounds it).

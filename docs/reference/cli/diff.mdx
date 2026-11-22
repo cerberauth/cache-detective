@@ -1,5 +1,5 @@
 ---
-title: diff
+title: cache-detective diff
 description: Compare two cache-detective JSON scans to detect cache-config drift.
 sidebar:
   order: 3
@@ -36,4 +36,4 @@ Findings are matched by their `id` (falling back to `title` when absent), `url`,
 
 ## Exit codes
 
-`diff` exits `1` when findings were **added** or **changed severity** between the two scans, and `0` otherwise (including when findings were only removed). This makes it suitable as a CI gate for cache-config drift — see the [GitHub Actions guide](../../github-actions/#detect-cache-config-drift-between-deploys).
+`diff` exits `1` when findings were **added** or **changed severity** between the two scans, and `0` otherwise (including when findings were only removed). This makes it suitable as a CI gate for cache-config drift — see the [GitHub Actions guide](../../deployment/github-actions/#detect-cache-config-drift-between-deploys).
